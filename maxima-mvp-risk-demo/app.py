@@ -4,19 +4,30 @@ import pandas as pd, numpy as np
 import streamlit as st
 import plotly.express as px
 
+from pathlib import Path
+DEFAULT_XLSX = Path(__file__).parent / "Investor_MockData.xlsx"
+
 st.set_page_config(page_title="Maxima Wealth - Investor Helper (Risk Slider)", layout="wide", page_icon="🧭")
 
 @st.cache_data
-def load_data(path="Investor_MockData.xlsx"):
-    trades = pd.read_excel(path, sheet_name="Trades")
-    mkt = pd.read_excel(path, sheet_name="MarketBackground")
+def load_data(path=None, uploaded=None):
+    if uploaded is not None:
+        src = uploaded
+    else:
+        src = Path(path) if path else DEFAULT_XLSX
+
+    trades = pd.read_excel(src, sheet_name="Trades")
+    mkt    = pd.read_excel(src, sheet_name="MarketBackground")
+
     for c in ["Open Time","Close Time"]:
         trades[c] = pd.to_datetime(trades[c], errors="coerce")
-    for c in ["Size","Open Price","Close Price","Commission","Swap","Profit","RecommendedPosition","RiskScore","InitCapital"]:
+    for c in ["Size","Open Price","Close Price","Commission","Swap","Profit",
+              "RecommendedPosition","RiskScore","InitCapital"]:
         if c in trades.columns:
             trades[c] = pd.to_numeric(trades[c], errors="coerce")
     mkt["Date"] = pd.to_datetime(mkt["Date"], errors="coerce").dt.date
     return trades, mkt
+
 
 def compute_daily(trades: pd.DataFrame):
     t = trades.copy()
@@ -82,13 +93,21 @@ def risk_alerts(mkt_row):
 trades, mkt = load_data()
 
 with st.sidebar:
-    st.header("Investor Controls")
+    uploaded = st.file_uploader("Upload Excel (Trades & MarketBackground)", type=["xlsx"])
     risk = st.slider("Risk tolerance (1 = conservative, 10 = aggressive)", 1, 10, 5)
+
+    # 先加载数据
+    trades, mkt = load_data(uploaded=uploaded)
+
+    # 加额外筛选
+    st.header("Investor Controls")
     syms = sorted(trades["Symbol"].dropna().unique().tolist())
     strats = sorted(trades["Strategy"].dropna().unique().tolist())
     accounts = sorted(trades["Account"].dropna().unique().tolist())
+
     sel_accounts = st.multiselect("Accounts", accounts, default=accounts)
     sel_strats = st.multiselect("Strategies", strats, default=strats)
+
 
 f = trades.copy()
 if sel_accounts: f = f[f["Account"].isin(sel_accounts)]
