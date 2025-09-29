@@ -188,9 +188,10 @@ trades, mkt = load_mock_data()
 with st.sidebar:
     st.header("Investor Controls")
 
+    # 数据源选择
     data_source = st.radio("Data source", ["Mock demo (trades)", "Upload MT5 OHLCV"], index=0)
 
-    # If mock missing, allow upload
+    # 如果 mock 数据缺失，允许上传 Excel
     if trades.empty or mkt.empty:
         xls_up = st.file_uploader("Upload Investor_MockData.xlsx (optional)", type=["xlsx"])
         if xls_up is not None:
@@ -202,11 +203,14 @@ with st.sidebar:
             if "Date" in mkt.columns:
                 mkt["Date"] = pd.to_datetime(mkt["Date"], errors="coerce").dt.date
 
-    syms_all = sorted(trades["Symbol"].dropna().unique().tolist()) if not trades.empty else []
-    sel_syms = st.multiselect("Symbols (mock demo)", syms_all, default=syms_all)
+    # 固定候选：完整符号列表（不会因为用户选择变化而消失）
+    all_symbols = sorted(trades["Symbol"].dropna().unique().tolist()) if not trades.empty else []
+    sel_syms = st.multiselect("Symbols (mock demo)", options=all_symbols, default=all_symbols)
 
+    # 风险滑块
     risk = st.slider("Risk tolerance (1 = conservative, 10 = aggressive)", 1, 10, 5)
 
+    # 账户/策略过滤
     accounts = sorted(trades["Account"].dropna().unique().tolist()) if not trades.empty else []
     strats = sorted(trades["Strategy"].dropna().unique().tolist()) if not trades.empty else []
     sel_accounts = st.multiselect("Accounts", accounts, default=accounts)
@@ -220,11 +224,13 @@ with st.sidebar:
         index=4, horizontal=True
     )
 
+    # MT5 文件上传
     uploaded = st.file_uploader(
         "Upload MT5 export (Tools → History Center → Export)",
         type=["csv","txt","tsv"],
         help="Supports TAB-separated or CSV."
     )
+
 
 # =============================== Header ===============================
 st.markdown("<h2 style='margin-bottom:0'>Investor Helper – Optimal Strategy Guide</h2>", unsafe_allow_html=True)
