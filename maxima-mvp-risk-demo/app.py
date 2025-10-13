@@ -38,29 +38,6 @@ def load_mock_data(path: str | None = None):
         mkt["Date"] = pd.to_datetime(mkt["Date"], errors="coerce").dt.date
     return trades, mkt
 
-@st.cache_data(show_spinner=False)
-def parse_mt5_csv(file_bytes: bytes) -> pd.DataFrame:
-    # Try TAB first, then comma
-    try:
-        df = pd.read_csv(io.BytesIO(file_bytes), sep="\t")
-    except Exception:
-        df = pd.read_csv(io.BytesIO(file_bytes))
-    mapper = {
-        "<DATE>":"date", "<TIME>":"time", "<OPEN>":"open", "<HIGH>":"high",
-        "<LOW>":"low", "<CLOSE>":"close", "<TICKVOL>":"tickvol",
-        "<VOL>":"volume", "<SPREAD>":"spread"
-    }
-    df = df.rename(columns=mapper)
-    if "date" in df and "time" in df:
-        dt = pd.to_datetime(df["date"].astype(str) + " " + df["time"].astype(str), errors="coerce")
-    elif "time" in df:
-        dt = pd.to_datetime(df["time"], errors="coerce")
-    else:
-        raise ValueError("Cannot find date/time columns in uploaded file.")
-    df = df.assign(datetime=dt).dropna(subset=["datetime"]).set_index("datetime").sort_index()
-    keep = [c for c in ["open","high","low","close","volume"] if c in df.columns]
-    return df[keep].astype(float)
-
 # =============================== Helpers ===============================
 def compute_daily_from_trades(trades: pd.DataFrame):
     t = trades.copy()
@@ -194,6 +171,7 @@ data_source = st.radio(
     ["Mock demo (trades)", "Upload MT5 OHLCV", "Upload Market CSV (OHLCV)"],
     index=0
 )
+
 mktcsv = st.file_uploader(
     "Upload market CSV (date,symbol,open,high,low,close[,adj_close,volume])",
     type=["csv"],
@@ -230,13 +208,6 @@ if trades.empty or mkt.empty:
         "Preset",
         ["Daily","Weekly","Monthly","Yearly","Maximum","Custom"],
         index=4, horizontal=True
-    )
-
-    # MT5 文件上传
-    uploaded = st.file_uploader(
-        "Upload MT5 export (Tools → History Center → Export)",
-        type=["csv","txt","tsv"],
-        help="Supports TAB-separated or CSV."
     )
 
 
@@ -436,101 +407,6 @@ if px.shape[1] >= 1:
         )
 else:
     st.info("Select at least one symbol to build the portfolio.")
-
-
-
-# -------- PATH B: MT5 OHLCV upload --------
-if data_source.startswith("Upload") and uploaded is not None:
-    try:
-        oh = parse_mt5_csv(uploaded.read())  # index=datetime, has close
-        oh_f = apply_time_range(oh.index, preset, oh)
-        if oh_f is None or oh_f.empty:
-            st.info("No data in selected range.")
-        else:
-            price = oh_f["close"].rename("price")
-            ret = pct_returns_from_price(price)
-            cr = cum_return(ret)
-            dd = drawdown_curve(ret)
-
-            # 1) Metric cards + sparklines
-            colA, colB, colC, colD = st.columns(4)
-            with colA:
-                st.metric("Total Return", f"{(cr.iloc[-1] if len(cr) else 0)*100:.1f}%")
-                st.plotly_chart(tiny_sparkline(cr.dropna()), use_container_width=True)
-            with colB:
-                st.metric("Volatility (ann.)", f"{annualized_vol(ret):.2%}")
-                st.plotly_chart(tiny_sparkline(rolling_stat(ret, 30, "vol").dropna()), use_container_width=True)
-            with colC:
-                st.metric("Sharpe", f"{sharpe_ratio(ret):.2f}")
-                st.plotly_chart(tiny_sparkline(rolling_stat(ret, 30, "sharpe").dropna()), use_container_width=True)
-            with colD:
-                st.metric("Max Drawdown", f"{dd.min():.2%}")
-                st.plotly_chart(tiny_sparkline(dd.dropna()), use_container_width=True)
-
-            # 2) Toggle chart + rolling metric
-            toggle = st.radio("View", ["Price", "Cumulative Return", "Drawdown"], horizontal=True, key="mt5_view")
-            fig_main = go.Figure()
-            if toggle == "Price":
-                fig_main.add_trace(go.Scatter(x=price.index, y=price, mode="lines", name="Price"))
-            elif toggle == "Cumulative Return":
-                fig_main.add_trace(go.Scatter(x=cr.index, y=cr, mode="lines", name="CumReturn"))
-            else:
-                fig_main.add_trace(go.Scatter(x=dd.index, y=dd, mode="lines", name="Drawdown"))
-            fig_main.update_layout(margin=dict(l=0,r=0,t=20,b=0), height=360, legend_title_text="")
-            st.plotly_chart(fig_main, use_container_width=True)
-
-            roll_win = st.select_slider("Rolling window (days)", options=[20, 30, 60, 90], value=30, key="mt5_roll")
-            roll_series = rolling_stat(ret, roll_win, "sharpe")
-            st.plotly_chart(
-                go.Figure(go.Scatter(x=roll_series.index, y=roll_series, mode="lines"))
-                .update_layout(margin=dict(l=0,r=0,t=10,b=0), height=200),
-                use_container_width=True
-            )
-
-            # 3) Strategy Lab – comparison (Buy & Hold baseline)
-            st.subheader("Strategy Lab – Comparison")
-            def row_from_returns(name, r):
-                return dict(
-                    Strategy=name,
-                    TotalReturn=float(cum_return(r).iloc[-1]) if len(r.dropna()) else 0.0,
-                    Vol=float(annualized_vol(r)),
-                    Sharpe=float(sharpe_ratio(r)),
-                    MaxDD=float(drawdown_curve(r).min())
-                )
-            comp_df = pd.DataFrame([row_from_returns("Buy & Hold", ret)])
-            if not comp_df.empty:
-                best_sharpe = comp_df.loc[comp_df["Sharpe"].idxmax(), "Strategy"]
-                best_return = comp_df.loc[comp_df["TotalReturn"].idxmax(), "Strategy"]
-                prof = comp_df[comp_df["TotalReturn"] > 0]
-                base = prof if len(prof) else comp_df
-                best_minrisk = base.loc[base["Vol"].idxmin(), "Strategy"]
-                st.write(f"Highest Reward/Risk: {best_sharpe} | Maximum Profit: {best_return} | Minimum Risk (Profit>0): {best_minrisk}")
-                st.dataframe(
-                    comp_df.assign(
-                        TotalReturn=lambda d: (d["TotalReturn"]*100).round(2),
-                        Vol=lambda d: (d["Vol"]*100).round(2),
-                        Sharpe=lambda d: d["Sharpe"].round(2),
-                        MaxDD=lambda d: (d["MaxDD"]*100).round(2)
-                    ).rename(columns={"TotalReturn":"Return %","Vol":"Vol %","MaxDD":"MaxDD %"}),
-                    use_container_width=True, height=220
-                )
-
-            # 4) Distribution & Drawdown
-            st.subheader("Return Distribution and Drawdown")
-            colL, colR = st.columns(2)
-            with colL:
-                st.caption("Return Distribution (per period)")
-                hist = px.histogram(ret.dropna(), nbins=40, opacity=0.85)
-                hist.update_layout(margin=dict(l=0,r=0,t=10,b=0), height=280)
-                st.plotly_chart(hist, use_container_width=True)
-            with colR:
-                st.caption("Drawdown Curve")
-                dd_fig = go.Figure(go.Scatter(x=dd.index, y=dd, mode="lines"))
-                dd_fig.update_layout(margin=dict(l=0,r=0,t=10,b=0), height=280)
-                st.plotly_chart(dd_fig, use_container_width=True)
-
-    except Exception as e:
-        st.error(f"Failed to parse MT5 file: {e}")
 
 # -------- PATH A: Mock trades --------
 else:
