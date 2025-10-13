@@ -410,9 +410,8 @@ if data_source == "Upload Market CSV (OHLCV)":
                 )
         else:
             st.info("Select at least one symbol to build the portfolio.")
-# ===== Optimal Portfolio (Markowitz via PyPortfolioOpt) =====
-!pip -q install pypfopt
 
+# ===== Optimal Portfolio (Markowitz via PyPortfolioOpt) =====
 from pypfopt.efficient_frontier import EfficientFrontier
 from pypfopt.expected_returns import mean_historical_return
 from pypfopt.risk_models import CovarianceShrinkage
