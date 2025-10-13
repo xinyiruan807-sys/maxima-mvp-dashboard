@@ -409,7 +409,7 @@ else:
     st.info("Select at least one symbol to build the portfolio.")
 
 # -------- PATH A: Mock trades --------
-else:
+elif data_source == "Mock demo (trades)":
     if trades.empty or mkt.empty:
         st.warning("Demo Excel not found. Upload Investor_MockData.xlsx on the left, or switch to 'Upload MT5 OHLCV' mode.")
     else:
