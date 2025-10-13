@@ -1,10 +1,8 @@
 streamlit==1.38.0
 pandas==2.2.2
 numpy==1.26.4
+scipy==1.11.4
 plotly==5.23.0
 yfinance==0.2.43
-pypfopt==1.5.5
-statsmodels==0.14.2
 openpyxl==3.1.5
-scipy==1.11.4
-matplotlib==3.8.4
+pypfopt==1.5.5
