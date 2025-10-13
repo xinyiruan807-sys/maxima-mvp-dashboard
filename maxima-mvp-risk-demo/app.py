@@ -222,9 +222,9 @@ if data_source == "Upload Market CSV":
         st.info("Please upload a market CSV.")
     else:
     # 读取与清洗
-    df_mkt = pd.read_csv(mktcsv)
-    needed = {"date","symbol","close"}
-    miss = needed - set(df_mkt.columns)
+        df_mkt = pd.read_csv(mktcsv)
+        needed = {"date","symbol","close"}
+        miss = needed - set(df_mkt.columns)
     if miss:
         st.error(f"CSV 缺少列：{sorted(list(miss))} ；至少需要 date,symbol,close。")
         st.stop()
