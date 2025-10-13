@@ -457,6 +457,7 @@ if data_source == "Upload Market CSV (OHLCV)":
                 st.dataframe(df_ms.assign(Weight=lambda d: (d["Weight"]*100).round(1)).rename(columns={"Weight":"Weight %"}),
                              use_container_width=True, height=260)
                 st.caption(f"Performance → Return: {ms_ret:.2%} | Vol: {ms_vol:.2%} | Sharpe: {ms_shp:.2f}")
+            
             with col2:
             st.markdown("**Min Variance Weights**")
             df_mv = pd.DataFrame({"Symbol": syms, "Weight": w_mv}).sort_values("Weight", ascending=False)
