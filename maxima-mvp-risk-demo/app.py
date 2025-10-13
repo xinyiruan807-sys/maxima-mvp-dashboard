@@ -216,226 +216,233 @@ st.markdown("<h2 style='margin-bottom:0'>Investor Helper – Optimal Strategy Gu
 st.caption("Adjust the risk slider, choose market/time range, and view optimal choices.")
 
 # =============================== Main logic ===============================
-# -------- PATH C: Market CSV upload --------
-if data_source == "Upload Market CSV":
+
+# -------- PATH C: Market CSV (OHLCV) upload --------
+if data_source == "Upload Market CSV (OHLCV)":
     if mktcsv is None:
         st.info("Please upload a market CSV.")
     else:
-    # 读取与清洗
+        # ======== 读取与清洗 ========
         df_mkt = pd.read_csv(mktcsv)
-        needed = {"date","symbol","close"}
+        needed = {"date", "symbol", "close"}
         miss = needed - set(df_mkt.columns)
-    if miss:
-        st.error(f"CSV 缺少列：{sorted(list(miss))} ；至少需要 date,symbol,close。")
-        st.stop()
+        if miss:
+            st.error(f"CSV 缺少列：{sorted(list(miss))}；至少需要 date,symbol,close。")
+            st.stop()
 
-    df_mkt["date"] = pd.to_datetime(df_mkt["date"], errors="coerce")
-    df_mkt = df_mkt.dropna(subset=["date","symbol","close"]).sort_values(["symbol","date"])
-    # 若没有 adj_close / volume，补空列（不影响显示）
-    if "adj_close" not in df_mkt.columns: df_mkt["adj_close"] = df_mkt["close"]
-    if "volume" not in df_mkt.columns:    df_mkt["volume"] = pd.NA
+        df_mkt["date"] = pd.to_datetime(df_mkt["date"], errors="coerce")
+        df_mkt = df_mkt.dropna(subset=["date", "symbol", "close"]).sort_values(["symbol", "date"])
+        if "adj_close" not in df_mkt.columns:
+            df_mkt["adj_close"] = df_mkt["close"]
+        if "volume" not in df_mkt.columns:
+            df_mkt["volume"] = pd.NA
 
-    st.success(f"✅ Loaded {len(df_mkt):,} rows • {df_mkt['symbol'].nunique()} symbols")
+        st.success(f"✅ Loaded {len(df_mkt):,} rows • {df_mkt['symbol'].nunique()} symbols")
 
-    # 选择资产 & 时间
-    all_syms = sorted(df_mkt["symbol"].unique())
-    pick = st.multiselect("Symbols", all_syms, default=all_syms[:min(5,len(all_syms))])
-    dmin, dmax = df_mkt["date"].min(), df_mkt["date"].max()
-    dr = st.slider("Date range", min_value=dmin.to_pydatetime(), max_value=dmax.to_pydatetime(),
-                   value=(dmin.to_pydatetime(), dmax.to_pydatetime()))
-
-    view = df_mkt[(df_mkt["symbol"].isin(pick)) & (df_mkt["date"].between(dr[0], dr[1]))].copy()
-
-    # 价格曲线（多资产）
-    st.subheader("Close Price (multi-asset)")
-    pivot = view.pivot_table(index="date", columns="symbol", values="close")
-    st.line_chart(pivot, use_container_width=True)
-
-    # 快速指标表（复用你已定义的工具函数）
-    st.subheader("Quick Metrics")
-    rows = []
-    for sym in pick:
-        sub = view[view["symbol"]==sym].set_index("date").sort_index()
-        r = pct_returns_from_price(sub["close"])
-        cr = cum_return(r)
-        dd = drawdown_curve(r)
-        rows.append({
-            "Symbol": sym,
-            "Total Return": f"{(cr.iloc[-1]*100):.1f}%" if len(cr) else None,
-            "Vol (ann.)":   f"{(annualized_vol(r)*100):.1f}%" if len(r.dropna()) else None,
-            "Sharpe":       f"{sharpe_ratio(r):.2f}" if len(r.dropna()) else None,
-            "Max DD":       f"{(dd.min()*100):.1f}%" if len(dd.dropna()) else None
-        })
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, height=260)
-
-    # 单资产视图 + Rolling 指标
-    if pick:
-        sym0 = pick[0]
-        sub0 = view[view["symbol"]==sym0].set_index("date").sort_index()
-        r0 = pct_returns_from_price(sub0["close"])
-        cr0 = cum_return(r0)
-        dd0 = drawdown_curve(r0)
-
-        colA, colB, colC, colD = st.columns(4)
-        with colA:
-            st.metric("Total Return", f"{(cr0.iloc[-1] if len(cr0) else 0)*100:.1f}%")
-            st.plotly_chart(tiny_sparkline(cr0.dropna()), use_container_width=True)
-        with colB:
-            st.metric("Volatility (ann.)", f"{annualized_vol(r0):.2%}")
-            st.plotly_chart(tiny_sparkline(rolling_stat(r0, 30, 'vol').dropna()), use_container_width=True)
-        with colC:
-            st.metric("Sharpe", f"{sharpe_ratio(r0):.2f}")
-            st.plotly_chart(tiny_sparkline(rolling_stat(r0, 30, 'sharpe').dropna()), use_container_width=True)
-        with colD:
-            st.metric("Max Drawdown", f"{dd0.min():.2%}")
-            st.plotly_chart(tiny_sparkline(dd0.dropna()), use_container_width=True)
-
-        st.subheader(f"{sym0} — Price / CumReturn / Drawdown")
-        toggle = st.radio("View", ["Price","Cumulative Return","Drawdown"], horizontal=True, key="csv_view")
-        fig = go.Figure()
-        if toggle == "Price":
-            fig.add_trace(go.Scatter(x=sub0.index, y=sub0["close"], mode="lines", name="Price"))
-        elif toggle == "Cumulative Return":
-            fig.add_trace(go.Scatter(x=cr0.index, y=cr0, mode="lines", name="CumReturn"))
-        else:
-            fig.add_trace(go.Scatter(x=dd0.index, y=dd0, mode="lines", name="Drawdown"))
-        fig.update_layout(margin=dict(l=0,r=0,t=20,b=0), height=360, legend_title_text="")
-        st.plotly_chart(fig, use_container_width=True)
-      
-# ===== Portfolio Backtest (Equal / Custom Weights) =====
-st.subheader("Portfolio Backtest")
-
-# —— 权重设置（等权 / 自定义 JSON）
-st.markdown("**Weights**")
-wmode = st.radio("Weighting", ["Equal weight", "Custom JSON"], horizontal=True, key="wmode_csv")
-w_text = st.text_input(
-    'Custom weights JSON (e.g. {"AAPL":0.3,"BTC-USD":0.2,"XAUUSD=X":0.5})',
-    value="", placeholder='{"AAPL":0.3,"BTC-USD":0.2}'
-)
-
-def make_weights(symbols: list[str], mode: str, text: str) -> dict[str, float]:
-    # 等权
-    if mode == "Equal weight" or not text.strip():
-        n = len(symbols)
-        return {s: (1.0 / n if n > 0 else 0.0) for s in symbols}
-    # 解析自定义 JSON
-    try:
-        raw = json.loads(text)
-        w = {s: float(raw.get(s, 0.0)) for s in symbols}
-        ssum = sum(v for v in w.values() if v > 0)
-        if ssum <= 0:
-            raise ValueError("sum<=0")
-        # 负数当 0 处理并归一化
-        w = {k: max(0.0, v) / ssum for k, v in w.items()}
-        # 提示被忽略的无效符号
-        extra = [k for k in raw.keys() if k not in symbols]
-        if extra:
-            st.info(f"Ignored symbols not in selection: {extra}")
-        return w
-    except Exception:
-        st.warning("Invalid JSON weights. Fallback to equal weight.")
-        n = len(symbols)
-        return {s: (1.0 / n if n > 0 else 0.0) for s in symbols}
-
-# —— 价格 → 收益 → 组合净值
-px = view.pivot_table(index="date", columns="symbol", values="close").sort_index()
-# 组合需要同一天都有价格的资产行；行有缺失则剔除
-px = px.dropna(axis=0, how="any")
-
-if px.shape[1] >= 1:
-    symbols_in_view = list(px.columns)
-    weights = make_weights(symbols_in_view, wmode, w_text)
-    w_vec = np.array([weights.get(s, 0.0) for s in symbols_in_view])
-    if w_vec.sum() == 0:
-        st.info("All weights are zero. Please adjust.")
-    else:
-        w_vec = w_vec / w_vec.sum()
-        ret_mat = px.pct_change().dropna()
-        port_ret = pd.Series(ret_mat.values @ w_vec, index=ret_mat.index, name="port_ret")
-        port_eq  = (1 + port_ret).cumprod()                # 组合净值
-        port_dd  = (port_eq / port_eq.cummax() - 1.0)      # 回撤
-
-        # —— 组合指标
-        def _ann_vol(r):
-            r = r.dropna()
-            return float(r.std(ddof=1) * np.sqrt(252)) if len(r) > 1 else None
-        def _sharpe(r):
-            r = r.dropna()
-            vol = r.std(ddof=1) * np.sqrt(252)
-            return float((r.mean() * 252) / vol) if (len(r) > 1 and vol > 0) else None
-
-        cA, cB, cC, cD = st.columns(4)
-        cA.metric("Portfolio Return", f"{(port_eq.iloc[-1] - 1)*100:.1f}%")
-        vol_ann = _ann_vol(port_ret);  cB.metric("Volatility (ann.)", f"{(vol_ann*100):.1f}%" if vol_ann is not None else "–")
-        shp = _sharpe(port_ret);       cC.metric("Sharpe", f"{shp:.2f}" if shp is not None else "–")
-        cD.metric("Max Drawdown", f"{port_dd.min()*100:.1f}%")
-
-        # —— 组合净值曲线
-        fig_port = go.Figure()
-        fig_port.add_trace(go.Scatter(x=port_eq.index, y=port_eq, mode="lines", name="Portfolio NAV"))
-        fig_port.update_layout(margin=dict(l=0, r=0, t=20, b=0), height=340, legend_title_text="")
-        st.plotly_chart(fig_port, use_container_width=True)
-
-        # —— 单资产 vs 组合 指标表
-        rows = []
-        for sym in symbols_in_view:
-            r = px[sym].pct_change().dropna()
-            eq = (1 + r).cumprod()
-            dd = (eq / eq.cummax() - 1.0).min() if len(eq) else np.nan
-            rows.append({
-                "Symbol": sym,
-                "Weight": f"{weights.get(sym,0.0)*100:.1f}%",
-                "Return %": (eq.iloc[-1] - 1) * 100 if len(eq) else np.nan,
-                "Vol %": _ann_vol(r) * 100 if _ann_vol(r) is not None else np.nan,
-                "Sharpe": _sharpe(r),
-                "MaxDD %": dd * 100 if pd.notna(dd) else np.nan
-            })
-        rows.append({
-            "Symbol": "Portfolio",
-            "Weight": "—",
-            "Return %": (port_eq.iloc[-1] - 1) * 100,
-            "Vol %": vol_ann * 100 if vol_ann is not None else np.nan,
-            "Sharpe": shp,
-            "MaxDD %": port_dd.min() * 100
-        })
-        tbl = pd.DataFrame(rows).round({"Return %": 2, "Vol %": 2, "Sharpe": 2, "MaxDD %": 2})
-        st.dataframe(tbl, use_container_width=True, height=300)
-
-        # —— 导出当前视图（过滤后的行）
-        st.download_button(
-            "Download current view (CSV)",
-            data=view.to_csv(index=False).encode("utf-8"),
-            file_name="market_view_filtered.csv",
-            mime="text/csv"
+        # ======== 选择资产与时间 ========
+        all_syms = sorted(df_mkt["symbol"].unique())
+        pick = st.multiselect("Symbols", all_syms, default=all_syms[: min(5, len(all_syms))])
+        dmin, dmax = df_mkt["date"].min(), df_mkt["date"].max()
+        dr = st.slider(
+            "Date range",
+            min_value=dmin.to_pydatetime(),
+            max_value=dmax.to_pydatetime(),
+            value=(dmin.to_pydatetime(), dmax.to_pydatetime()),
         )
-else:
-    st.info("Select at least one symbol to build the portfolio.")
+
+        view = df_mkt[
+            (df_mkt["symbol"].isin(pick))
+            & (df_mkt["date"].between(dr[0], dr[1]))
+        ].copy()
+
+        # ======== 多资产价格曲线 ========
+        st.subheader("Close Price (multi-asset)")
+        pivot = view.pivot_table(index="date", columns="symbol", values="close")
+        st.line_chart(pivot, use_container_width=True)
+
+        # ======== Quick Metrics ========
+        st.subheader("Quick Metrics")
+        rows = []
+        for sym in pick:
+            sub = view[view["symbol"] == sym].set_index("date").sort_index()
+            r = pct_returns_from_price(sub["close"])
+            cr = cum_return(r)
+            dd = drawdown_curve(r)
+            rows.append(
+                {
+                    "Symbol": sym,
+                    "Total Return": f"{(cr.iloc[-1] * 100):.1f}%" if len(cr) else None,
+                    "Vol (ann.)": f"{(annualized_vol(r) * 100):.1f}%" if len(r.dropna()) else None,
+                    "Sharpe": f"{sharpe_ratio(r):.2f}" if len(r.dropna()) else None,
+                    "Max DD": f"{(dd.min() * 100):.1f}%" if len(dd.dropna()) else None,
+                }
+            )
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, height=260)
+
+        # ======== 单资产图表 + 滚动指标 ========
+        if pick:
+            sym0 = pick[0]
+            sub0 = view[view["symbol"] == sym0].set_index("date").sort_index()
+            r0 = pct_returns_from_price(sub0["close"])
+            cr0 = cum_return(r0)
+            dd0 = drawdown_curve(r0)
+
+            colA, colB, colC, colD = st.columns(4)
+            with colA:
+                st.metric("Total Return", f"{(cr0.iloc[-1] if len(cr0) else 0)*100:.1f}%")
+                st.plotly_chart(tiny_sparkline(cr0.dropna()), use_container_width=True)
+            with colB:
+                st.metric("Volatility (ann.)", f"{annualized_vol(r0):.2%}")
+                st.plotly_chart(tiny_sparkline(rolling_stat(r0, 30, "vol").dropna()), use_container_width=True)
+            with colC:
+                st.metric("Sharpe", f"{sharpe_ratio(r0):.2f}")
+                st.plotly_chart(tiny_sparkline(rolling_stat(r0, 30, "sharpe").dropna()), use_container_width=True)
+            with colD:
+                st.metric("Max Drawdown", f"{dd0.min():.2%}")
+                st.plotly_chart(tiny_sparkline(dd0.dropna()), use_container_width=True)
+
+            st.subheader(f"{sym0} — Price / CumReturn / Drawdown")
+            toggle = st.radio("View", ["Price", "Cumulative Return", "Drawdown"], horizontal=True, key="csv_view")
+            fig = go.Figure()
+            if toggle == "Price":
+                fig.add_trace(go.Scatter(x=sub0.index, y=sub0["close"], mode="lines", name="Price"))
+            elif toggle == "Cumulative Return":
+                fig.add_trace(go.Scatter(x=cr0.index, y=cr0, mode="lines", name="CumReturn"))
+            else:
+                fig.add_trace(go.Scatter(x=dd0.index, y=dd0, mode="lines", name="Drawdown"))
+            fig.update_layout(margin=dict(l=0, r=0, t=20, b=0), height=360, legend_title_text="")
+            st.plotly_chart(fig, use_container_width=True)
+
+        # ======== Portfolio Backtest（含自定义权重） ========
+        st.subheader("Portfolio Backtest (Equal / Custom Weights)")
+        import json
+
+        st.markdown("**Weights**")
+        wmode = st.radio("Weighting", ["Equal weight", "Custom JSON"], horizontal=True, key="wmode_csv")
+        w_text = st.text_input(
+            'Custom weights JSON (e.g. {"AAPL":0.3,"BTC-USD":0.2,"XAUUSD=X":0.5})',
+            value="", placeholder='{"AAPL":0.3,"BTC-USD":0.2}'
+        )
+
+        def make_weights(symbols: list[str], mode: str, text: str) -> dict[str, float]:
+            if mode == "Equal weight" or not text.strip():
+                n = len(symbols)
+                return {s: (1.0 / n if n > 0 else 0.0) for s in symbols}
+            try:
+                raw = json.loads(text)
+                w = {s: float(raw.get(s, 0.0)) for s in symbols}
+                ssum = sum(v for v in w.values() if v > 0)
+                if ssum <= 0:
+                    raise ValueError("sum<=0")
+                w = {k: max(0.0, v) / ssum for k, v in w.items()}
+                extra = [k for k in raw.keys() if k not in symbols]
+                if extra:
+                    st.info(f"Ignored symbols not in selection: {extra}")
+                return w
+            except Exception:
+                st.warning("Invalid JSON weights. Fallback to equal weight.")
+                n = len(symbols)
+                return {s: (1.0 / n if n > 0 else 0.0) for s in symbols}
+
+        px = view.pivot_table(index="date", columns="symbol", values="close").sort_index()
+        px = px.dropna(axis=0, how="any")
+        if px.shape[1] >= 1:
+            symbols_in_view = list(px.columns)
+            weights = make_weights(symbols_in_view, wmode, w_text)
+            w_vec = np.array([weights.get(s, 0.0) for s in symbols_in_view])
+            if w_vec.sum() == 0:
+                st.info("All weights are zero. Please adjust.")
+            else:
+                w_vec = w_vec / w_vec.sum()
+                ret_mat = px.pct_change().dropna()
+                port_ret = pd.Series(ret_mat.values @ w_vec, index=ret_mat.index, name="port_ret")
+                port_eq = (1 + port_ret).cumprod()
+                port_dd = (port_eq / port_eq.cummax() - 1.0)
+
+                def _ann_vol(r):
+                    r = r.dropna()
+                    return float(r.std(ddof=1) * np.sqrt(252)) if len(r) > 1 else None
+                def _sharpe(r):
+                    r = r.dropna()
+                    vol = r.std(ddof=1) * np.sqrt(252)
+                    return float((r.mean() * 252) / vol) if (len(r) > 1 and vol > 0) else None
+
+                cA, cB, cC, cD = st.columns(4)
+                cA.metric("Portfolio Return", f"{(port_eq.iloc[-1] - 1)*100:.1f}%")
+                vol_ann = _ann_vol(port_ret);  cB.metric("Volatility (ann.)", f"{(vol_ann*100):.1f}%" if vol_ann is not None else "–")
+                shp = _sharpe(port_ret);       cC.metric("Sharpe", f"{shp:.2f}" if shp is not None else "–")
+                cD.metric("Max Drawdown", f"{port_dd.min()*100:.1f}%")
+
+                fig_port = go.Figure()
+                fig_port.add_trace(go.Scatter(x=port_eq.index, y=port_eq, mode="lines", name="Portfolio NAV"))
+                fig_port.update_layout(margin=dict(l=0, r=0, t=20, b=0), height=340, legend_title_text="")
+                st.plotly_chart(fig_port, use_container_width=True)
+
+                rows = []
+                for sym in symbols_in_view:
+                    r = px[sym].pct_change().dropna()
+                    eq = (1 + r).cumprod()
+                    dd = (eq / eq.cummax() - 1.0).min() if len(eq) else np.nan
+                    rows.append({
+                        "Symbol": sym,
+                        "Weight": f"{weights.get(sym,0.0)*100:.1f}%",
+                        "Return %": (eq.iloc[-1] - 1) * 100 if len(eq) else np.nan,
+                        "Vol %": _ann_vol(r) * 100 if _ann_vol(r) is not None else np.nan,
+                        "Sharpe": _sharpe(r),
+                        "MaxDD %": dd * 100 if pd.notna(dd) else np.nan
+                    })
+                rows.append({
+                    "Symbol": "Portfolio",
+                    "Weight": "—",
+                    "Return %": (port_eq.iloc[-1] - 1) * 100,
+                    "Vol %": vol_ann * 100 if vol_ann is not None else np.nan,
+                    "Sharpe": shp,
+                    "MaxDD %": port_dd.min() * 100
+                })
+                tbl = pd.DataFrame(rows).round({"Return %": 2, "Vol %": 2, "Sharpe": 2, "MaxDD %": 2})
+                st.dataframe(tbl, use_container_width=True, height=300)
+
+                st.download_button(
+                    "Download current view (CSV)",
+                    data=view.to_csv(index=False).encode("utf-8"),
+                    file_name="market_view_filtered.csv",
+                    mime="text/csv"
+                )
+        else:
+            st.info("Select at least one symbol to build the portfolio.")
 
 # -------- PATH A: Mock trades --------
 elif data_source == "Mock demo (trades)":
     if trades.empty or mkt.empty:
-        st.warning("Demo Excel not found. Upload Investor_MockData.xlsx on the left, or switch to 'Upload MT5 OHLCV' mode.")
+        st.warning("Demo Excel not found. Upload Investor_MockData.xlsx on the left, or switch to CSV mode.")
     else:
+        # ======== 过滤 Trades ========
         f = trades.copy()
-        if sel_accounts: f = f[f["Account"].isin(sel_accounts)]
-        if sel_strats:   f = f[f["Strategy"].isin(sel_strats)]
-        if sel_syms:     f = f[f["Symbol"].isin(sel_syms)]
+        if sel_accounts:
+            f = f[f["Account"].isin(sel_accounts)]
+        if sel_strats:
+            f = f[f["Strategy"].isin(sel_strats)]
+        if sel_syms:
+            f = f[f["Symbol"].isin(sel_syms)]
 
+        # ======== 聚合为日频 ========
         total, sym_daily, strat_daily = compute_daily_from_trades(f)
 
-        # Apply time range by converting date to datetime index
+        # ======== 应用时间范围（把 date 作为索引以复用 apply_time_range） ========
         if not sym_daily.empty:
             sym_dt = sym_daily.copy()
             sym_dt["date_dt"] = pd.to_datetime(sym_dt["date"])
             sym_dt = sym_dt.set_index("date_dt")
             sym_dt = apply_time_range(sym_dt.index, preset, sym_dt)
             sym_daily = sym_dt.reset_index(drop=True)
+
         if not total.empty:
             tot_dt = total.copy()
             tot_dt["date_dt"] = pd.to_datetime(tot_dt["date"])
             tot_dt = tot_dt.set_index("date_dt")
             tot_dt = apply_time_range(tot_dt.index, preset, tot_dt)
             total = tot_dt.reset_index(drop=True)
+
         if not strat_daily.empty:
             strat_dt = strat_daily.copy()
             strat_dt["date_dt"] = pd.to_datetime(strat_dt["date"])
@@ -443,22 +450,23 @@ elif data_source == "Mock demo (trades)":
             strat_dt = apply_time_range(strat_dt.index, preset, strat_dt)
             strat_daily = strat_dt.reset_index(drop=True)
 
+        # ======== 按风险给出配置并生成组合 PnL 曲线 ========
         syms_for_alloc = sorted(f["Symbol"].dropna().unique().tolist())
         alloc = risk_to_allocation(risk, syms_for_alloc)
         port = portfolio_curve_from_alloc(sym_daily, alloc) if not sym_daily.empty else pd.DataFrame()
 
-        # Market risk alerts
+        # ======== 市场风险提示 ========
         latest_date = mkt["Date"].max() if not mkt.empty else None
         latest_row = mkt[mkt["Date"] == latest_date].iloc[0] if latest_date is not None else None
         alerts = risk_alerts(latest_row) if latest_row is not None else ["No market data."]
 
-        # Allocation + Alerts
-        c1, c2 = st.columns([2,1])
+        # ======== 左：配置柱状图；右：风险提示 ========
+        c1, c2 = st.columns([2, 1])
         with c1:
             alloc_df = pd.DataFrame({"Symbol": list(alloc.keys()), "Weight": list(alloc.values())}).sort_values("Weight", ascending=False)
             fig_alloc = px.bar(alloc_df, x="Symbol", y="Weight", title="Optimal Allocation (by Risk)", text_auto=".0%")
             fig_alloc.update_yaxes(tickformat=".0%")
-            fig_alloc.update_layout(margin=dict(l=0,r=0,t=40,b=0), height=360)
+            fig_alloc.update_layout(margin=dict(l=0, r=0, t=40, b=0), height=360)
             st.plotly_chart(fig_alloc, use_container_width=True)
         with c2:
             st.markdown("#### Risk Alerts (latest)")
@@ -467,14 +475,17 @@ elif data_source == "Mock demo (trades)":
             for mmsg in alerts:
                 st.info(mmsg)
 
-        # Backtest tab + metric cards based on CumPNL-derived equity
+        # ======== Tabs：回测 / 策略洞察 / 交易明细 ========
         tab1, tab2, tab3 = st.tabs(["Portfolio Backtest", "Strategy Insights", "Trades"])
+
+        # --- Tab1: Backtest ---
         with tab1:
             if not port.empty:
-                fig = px.line(port, x="date", y=["DailyPNL","CumPNL"], title="Backtest: Daily & Cumulative PnL (Optimal Mix)")
-                fig.update_layout(margin=dict(l=0,r=0,t=40,b=0), height=400, legend_title_text="")
+                fig = px.line(port, x="date", y=["DailyPNL", "CumPNL"], title="Backtest: Daily & Cumulative PnL (Optimal Mix)")
+                fig.update_layout(margin=dict(l=0, r=0, t=40, b=0), height=400, legend_title_text="")
                 st.plotly_chart(fig, use_container_width=True)
 
+                # 用累计 PnL 构造“等价净值”以计算指标
                 equity = port.set_index("date")["CumPNL"]
                 equity = (equity - equity.min()) + 100.0
                 price = equity.rename("equity_price")
@@ -496,43 +507,42 @@ elif data_source == "Mock demo (trades)":
                     st.metric("Max Drawdown", f"{dd.min():.2%}")
                     st.plotly_chart(tiny_sparkline(dd.dropna()), use_container_width=True)
 
-                # Toggle chart + rolling
+                # 主图切换 + 滚动窗口
                 toggle = st.radio("View", ["Cumulative Return", "Drawdown"], horizontal=True, key="mock_view")
                 fig_main = go.Figure()
                 if toggle == "Cumulative Return":
                     fig_main.add_trace(go.Scatter(x=cr.index, y=cr, mode="lines", name="CumReturn"))
                 else:
                     fig_main.add_trace(go.Scatter(x=dd.index, y=dd, mode="lines", name="Drawdown"))
-                fig_main.update_layout(margin=dict(l=0,r=0,t=20,b=0), height=320, legend_title_text="")
+                fig_main.update_layout(margin=dict(l=0, r=0, t=20, b=0), height=320, legend_title_text="")
                 st.plotly_chart(fig_main, use_container_width=True)
 
                 roll_win = st.select_slider("Rolling window (days)", options=[20, 30, 60, 90], value=30, key="mock_roll")
                 roll_series = rolling_stat(ret, roll_win, "sharpe")
                 st.plotly_chart(
                     go.Figure(go.Scatter(x=roll_series.index, y=roll_series, mode="lines"))
-                    .update_layout(margin=dict(l=0,r=0,t=10,b=0), height=200),
+                    .update_layout(margin=dict(l=0, r=0, t=10, b=0), height=200),
                     use_container_width=True
                 )
-
-                # Distribution & Drawdown
+                # 分布 & 回撤曲线
                 st.subheader("Return Distribution and Drawdown")
                 colL, colR = st.columns(2)
                 with colL:
                     st.caption("Return Distribution (per period)")
                     hist = px.histogram(ret.dropna(), nbins=40, opacity=0.85)
-                    hist.update_layout(margin=dict(l=0,r=0,t=10,b=0), height=280)
+                    hist.update_layout(margin=dict(l=0, r=0, t=10, b=0), height=280)
                     st.plotly_chart(hist, use_container_width=True)
                 with colR:
                     st.caption("Drawdown Curve")
                     dd_fig = go.Figure(go.Scatter(x=dd.index, y=dd, mode="lines"))
-                    dd_fig.update_layout(margin=dict(l=0,r=0,t=10,b=0), height=280)
+                    dd_fig.update_layout(margin=dict(l=0, r=0, t=10, b=0), height=280)
                     st.plotly_chart(dd_fig, use_container_width=True)
-
             else:
                 st.info("Not enough data for the current filters.")
 
+        # --- Tab2: Strategy Insights ---
         with tab2:
-            # Strategy Insights (recent contribution by strategy)
+            # 策略近期贡献
             if not strat_daily.empty:
                 recent_dates = sorted(strat_daily["date"].unique())
                 keep_n = min(20, len(recent_dates))
@@ -540,12 +550,12 @@ elif data_source == "Mock demo (trades)":
                 recent = strat_daily[strat_daily["date"].isin(last_dates)]
                 g = recent.groupby("Strategy", as_index=False)["StratPNL"].sum().sort_values("StratPNL", ascending=False)
                 fig = px.bar(g, x="Strategy", y="StratPNL", title="Recent Strategy Contribution (last ~20 days)", text_auto=".2s")
-                fig.update_layout(margin=dict(l=0,r=0,t=40,b=0), height=340)
+                fig.update_layout(margin=dict(l=0, r=0, t=40, b=0), height=340)
                 st.plotly_chart(fig, use_container_width=True)
             else:
                 st.info("No strategy data available.")
 
-            # Strategy Lab – comparison table (baseline Buy & Hold on equity_price)
+            # Buy & Hold 基准（基于 equity_price）
             st.subheader("Strategy Lab – Comparison")
             def row_from_returns(name, r):
                 return dict(
@@ -556,14 +566,8 @@ elif data_source == "Mock demo (trades)":
                     MaxDD=float(drawdown_curve(r).min())
                 )
             if not port.empty:
-                comp_df = pd.DataFrame([row_from_returns("Buy & Hold", ret)])
+                comp_df = pd.DataFrame([row_from_returns("Buy & Hold", pct_returns_from_price((port.set_index("date")["CumPNL"] - port["CumPNL"].min() + 100.0)))])
                 if not comp_df.empty:
-                    best_sharpe = comp_df.loc[comp_df["Sharpe"].idxmax(), "Strategy"]
-                    best_return = comp_df.loc[comp_df["TotalReturn"].idxmax(), "Strategy"]
-                    prof = comp_df[comp_df["TotalReturn"] > 0]
-                    base = prof if len(prof) else comp_df
-                    best_minrisk = base.loc[base["Vol"].idxmin(), "Strategy"]
-                    st.write(f"Highest Reward/Risk: {best_sharpe} | Maximum Profit: {best_return} | Minimum Risk (Profit>0): {best_minrisk}")
                     st.dataframe(
                         comp_df.assign(
                             TotalReturn=lambda d: (d["TotalReturn"]*100).round(2),
@@ -574,7 +578,7 @@ elif data_source == "Mock demo (trades)":
                         use_container_width=True, height=220
                     )
 
-            # Multi-asset compare + correlation (based on sym_daily)
+            # 多资产比较 + 相关性
             if not sym_daily.empty:
                 st.subheader("Multi-Asset View")
                 pivot_sym = sym_daily.pivot(index="date", columns="Symbol", values="SymPNL").fillna(0.0)
@@ -589,23 +593,27 @@ elif data_source == "Mock demo (trades)":
                     fig_cmp = make_subplots(specs=[[{"secondary_y": True}]])
                     fig_cmp.add_trace(go.Scatter(x=cr_mat.index, y=cr_mat[pick[0]], name=pick[0]), secondary_y=False)
                     fig_cmp.add_trace(go.Scatter(x=cr_mat.index, y=cr_mat[pick[1]], name=pick[1]), secondary_y=True)
-                    fig_cmp.update_layout(margin=dict(l=0,r=0,t=20,b=0), height=340, legend_title_text="")
+                    fig_cmp.update_layout(margin=dict(l=0, r=0, t=20, b=0), height=340, legend_title_text="")
                     st.plotly_chart(fig_cmp, use_container_width=True)
 
                     corr = ret_mat[pick].corr()
                     heat = go.Figure(data=go.Heatmap(
                         z=corr.values, x=corr.columns, y=corr.index, colorscale="RdBu", zmin=-1, zmax=1
                     ))
-                    heat.update_layout(margin=dict(l=0,r=0,t=10,b=0), height=300)
+                    heat.update_layout(margin=dict(l=0, r=0, t=10, b=0), height=300)
                     st.plotly_chart(heat, use_container_width=True)
 
+        # --- Tab3: Trades 明细 ---
         with tab3:
             st.dataframe(f.sort_values("Open Time", ascending=False), use_container_width=True, height=420)
-            st.download_button("Download filtered trades (CSV)",
-                               data=f.to_csv(index=False).encode("utf-8"),
-                               file_name="filtered_trades.csv", mime="text/csv")
+            st.download_button(
+                "Download filtered trades (CSV)",
+                data=f.to_csv(index=False).encode("utf-8"),
+                file_name="filtered_trades.csv",
+                mime="text/csv"
+            )
 
-        # Asset recent contribution (under Allocation area)
+        # ======== 资产贡献度（页面下方） ========
         if not sym_daily.empty:
             st.subheader("Asset Contribution")
             lookback = st.select_slider("Contribution window (days)", options=[20, 60, 90], value=20, key="contrib_win")
@@ -614,7 +622,9 @@ elif data_source == "Mock demo (trades)":
             contrib = contrib.sort_values("SymPNL", ascending=False)
             fig_contrib = px.bar(contrib, x="Symbol", y="SymPNL",
                                  title=f"Recent Contribution (last ~{lookback} days)", text_auto=".2s")
-            fig_contrib.update_layout(margin=dict(l=0,r=0,t=40,b=0), height=300)
+            fig_contrib.update_layout(margin=dict(l=0, r=0, t=40, b=0), height=300)
             st.plotly_chart(fig_contrib, use_container_width=True)
 
+# ======== 页脚提示 ========
 st.caption("Mock demo for UX exploration. Not investment advice.")
+
