@@ -450,7 +450,7 @@ if data_source == "Upload Market CSV (OHLCV)":
             w_ms = res_ms.x if res_ms.success else w0
             ms_ret, ms_vol, ms_shp = port_stats(w_ms)
 
-                    col1, col2 = st.columns(2)
+        col1, col2 = st.columns(2)
 
         with col1:
             st.markdown("**Max Sharpe Weights**")
