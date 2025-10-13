@@ -199,17 +199,17 @@ mktcsv = st.file_uploader(
     type=["csv"],
     key="mktcsv_uploader"
 )
-    # 如果 mock 数据缺失，允许上传 Excel
-    if trades.empty or mkt.empty:
-        xls_up = st.file_uploader("Upload Investor_MockData.xlsx (optional)", type=["xlsx"])
-        if xls_up is not None:
-            trades = pd.read_excel(xls_up, sheet_name="Trades", engine="openpyxl")
-            mkt = pd.read_excel(xls_up, sheet_name="MarketBackground", engine="openpyxl")
-            for c in ["Open Time", "Close Time"]:
-                if c in trades.columns:
-                    trades[c] = pd.to_datetime(trades[c], errors="coerce")
-            if "Date" in mkt.columns:
-                mkt["Date"] = pd.to_datetime(mkt["Date"], errors="coerce").dt.date
+# 如果 mock 数据缺失，允许上传 Excel
+if trades.empty or mkt.empty:
+    xls_up = st.file_uploader("Upload Investor_MockData.xlsx (optional)", type=["xlsx"])
+    if xls_up is not None:
+        trades = pd.read_excel(xls_up, sheet_name="Trades", engine="openpyxl")
+        mkt = pd.read_excel(xls_up, sheet_name="MarketBackground", engine="openpyxl")
+        for c in ["Open Time", "Close Time"]:
+            if c in trades.columns:
+                trades[c] = pd.to_datetime(trades[c], errors="coerce")
+        if "Date" in mkt.columns:
+            mkt["Date"] = pd.to_datetime(mkt["Date"], errors="coerce").dt.date
 
     # 固定候选：完整符号列表（不会因为用户选择变化而消失）
     all_symbols = sorted(trades["Symbol"].dropna().unique().tolist()) if not trades.empty else []
