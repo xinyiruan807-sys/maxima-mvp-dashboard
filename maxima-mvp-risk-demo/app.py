@@ -411,6 +411,67 @@ if data_source == "Upload Market CSV (OHLCV)":
         else:
             st.info("Select at least one symbol to build the portfolio.")
 
+# ===== Optimal Portfolio (Markowitz via SciPy — no extra deps) =====
+st.subheader("Optimal Portfolio (Markowitz)")
+
+from math import sqrt
+from scipy.optimize import minimize
+
+prices = px.copy()  # date × symbols 的收盘价（你上面已有 px）
+if prices.shape[1] >= 2:
+    rets = prices.pct_change().dropna()
+    mu_daily = rets.mean()                  # 日均收益
+    mu_ann   = mu_daily * 252               # 年化收益
+    cov      = rets.cov() * 252             # 年化协方差
+    n        = prices.shape[1]
+    syms     = list(prices.columns)
+
+    # 公共约束：sum(w)=1，且 0<=w<=1
+    cons = ({'type': 'eq', 'fun': lambda w: np.sum(w) - 1.0},)
+    bounds = tuple((0.0, 1.0) for _ in range(n))
+    w0 = np.repeat(1.0/n, n)
+
+    def port_stats(w):
+        ret = float(mu_ann @ w)
+        vol = float(sqrt(w @ cov.values @ w))
+        sharpe = (ret / vol) if vol > 0 else 0.0
+        return ret, vol, sharpe
+
+    # ------ 最小方差 ------
+    def f_min_var(w):            # 目标：最小化方差
+        return float(w @ cov.values @ w)
+
+    res_mv = minimize(f_min_var, w0, bounds=bounds, constraints=cons, method="SLSQP")
+    w_mv = res_mv.x if res_mv.success else w0
+    mv_ret, mv_vol, mv_shp = port_stats(w_mv)
+
+    # ------ 最大夏普 ------
+    def f_max_sharpe(w):
+        ret, vol, _ = port_stats(w)
+        return -ret/vol if vol > 0 else 1e9    # 最大化夏普 = 最小化其负值
+
+    res_ms = minimize(f_max_sharpe, w0, bounds=bounds, constraints=cons, method="SLSQP")
+    w_ms = res_ms.x if res_ms.success else w0
+    ms_ret, ms_vol, ms_shp = port_stats(w_ms)
+
+    # 展示结果
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("**Max Sharpe Weights**")
+        df_ms = pd.DataFrame({"Symbol": syms, "Weight": w_ms}).sort_values("Weight", ascending=False)
+        st.dataframe(df_ms.assign(Weight=lambda d: (d["Weight"]*100).round(1))
+                     .rename(columns={"Weight":"Weight %"}), use_container_width=True, height=260)
+        st.caption(f"Performance → Return: {ms_ret:.2%} | Vol: {ms_vol:.2%} | Sharpe: {ms_shp:.2f}")
+
+    with col2:
+        st.markdown("**Min Variance Weights**")
+        df_mv = pd.DataFrame({"Symbol": syms, "Weight": w_mv}).sort_values("Weight", ascending=False)
+        st.dataframe(df_mv.assign(Weight=lambda d: (d["Weight"]*100).round(1))
+                     .rename(columns={"Weight":"Weight %"}), use_container_width=True, height=260)
+        st.caption(f"Performance → Return: {mv_ret:.2%} | Vol: {mv_vol:.2%} | Sharpe: {mv_shp:.2f}")
+
+else:
+    st.info("Need at least 2 symbols for Markowitz optimization.")
 
 
 
