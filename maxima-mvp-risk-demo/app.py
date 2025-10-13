@@ -480,36 +480,66 @@ if data_source == "Upload Market CSV (OHLCV)":
                     f"Performance → Return: {mv_ret:.2%} | Vol: {mv_vol:.2%} | Sharpe: {mv_shp:.2f}"
                 )
 
-        # ===== 风险贡献 (MCR/RC) =====
+              # ===== 风险贡献 (MCR/RC) =====
         st.subheader("Risk Contribution")
 
         rets_full = pivot.pct_change().dropna()
-        if rets_full.shape[1] >= 2:
+
+        # 如果资产数小于2，直接提示
+        if rets_full.shape[1] < 2:
+            st.info("Need at least 2 symbols for risk contribution.")
+        else:
+            # 计算协方差矩阵
             cov_full = rets_full.cov()
             sym_list = list(pivot.columns)
 
-            # 等权权重（如需改为自定义权重，可替换 w_eq）
+            # 计算等权权重（如需替换为自定义权重，可修改此行）
             w_eq = np.repeat(1 / len(sym_list), len(sym_list))
 
+            # 组合方差
             port_var = float(w_eq.T @ cov_full.values @ w_eq)
+
+            # 边际风险贡献 (MCR)
             mcr = (cov_full.values @ w_eq) / np.sqrt(port_var)
+
+            # 绝对风险贡献 (RC)
             rc = w_eq * mcr
 
+            # 转换为百分比
+            rc_pct = rc / rc.sum() if rc.sum() != 0 else np.zeros_like(rc)
+
+            # 构建 DataFrame
             rc_df = (
-                pd.DataFrame({"Symbol": sym_list, "RiskContribPct": rc / rc.sum()})
+                pd.DataFrame({
+                    "Symbol": sym_list,
+                    "RiskContribPct": rc_pct.astype(float)
+                })
                 .sort_values("RiskContribPct", ascending=False)
             )
 
-            fig_rc = px.bar(rc_df, x="Symbol", y="RiskContribPct")
+            # 绘制图表（直接传 Series，防止 AttributeError）
+            fig_rc = px.bar(
+                x=rc_df["Symbol"],
+                y=rc_df["RiskContribPct"],
+                labels={"x": "Symbol", "y": "Risk Contribution (%)"}
+            )
+
+            # 在柱子上方显示百分比
             fig_rc.update_traces(
                 text=(rc_df["RiskContribPct"] * 100).round(1).astype(str) + "%",
-                textposition="outside",
+                textposition="outside"
             )
+
+            # 坐标轴和布局优化
             fig_rc.update_yaxes(tickformat=".0%")
-            fig_rc.update_layout(height=320, margin=dict(l=0, r=0, t=20, b=0))
+            fig_rc.update_layout(
+                height=320,
+                margin=dict(l=0, r=0, t=20, b=0),
+                title="Portfolio Risk Contribution (Equal Weight)"
+            )
+
             st.plotly_chart(fig_rc, use_container_width=True)
-        else:
-            st.info("Need at least 2 symbols for risk contribution.")
+
 
 # -------- PATH A: Mock trades --------
 elif data_source == "Mock demo (trades)":
