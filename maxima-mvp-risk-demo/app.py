@@ -412,50 +412,6 @@ if data_source == "Upload Market CSV (OHLCV)":
             st.info("Select at least one symbol to build the portfolio.")
 
 
-# ===== Risk Contribution (谁贡献了组合波动) =====
-st.subheader("Risk Contribution")
-rets = prices.pct_change().dropna()
-if rets.shape[1] >= 2:
-    cov = rets.cov()
-    # 选用“当前组合”的权重：用自定义权重 weights（若没有，则等权）
-    sym_list = list(prices.columns)
-    if 'weights' in locals():
-        w_vec = np.array([weights.get(s, 0.0) for s in sym_list], dtype=float)
-        if w_vec.sum() == 0: w_vec = np.repeat(1/len(sym_list), len(sym_list))
-        w_vec = w_vec / w_vec.sum()
-    else:
-        w_vec = np.repeat(1/len(sym_list), len(sym_list))
-
-    port_var = float(w_vec.T @ cov.values @ w_vec)
-    mcr = (cov.values @ w_vec) / np.sqrt(port_var)      # 边际风险贡献
-    rc  = w_vec * mcr                                   # 绝对风险贡献
-    rc_df = pd.DataFrame({"Symbol": sym_list, "RiskContrib": rc})
-    rc_df["RiskContrib %"] = rc_df["RiskContrib"] / rc_df["RiskContrib"].sum()
-    rc_df = rc_df.sort_values("RiskContrib %", ascending=False)
-    fig_rc = px.bar(rc_df, x="Symbol", y="RiskContrib %", text_auto=".1%")
-    fig_rc.update_yaxes(tickformat=".0%"); fig_rc.update_layout(height=320, margin=dict(l=0,r=0,t=20,b=0))
-    st.plotly_chart(fig_rc, use_container_width=True)
-else:
-    st.info("Need at least 2 symbols for risk contribution.")
-
-# ===== Beta / Alpha vs S&P500 =====
-st.subheader("Beta / Alpha vs S&P 500")
-benchmark = "^GSPC"
-try:
-    import yfinance as yf
-    bench = yf.Ticker(benchmark).history(start=str(prices.index.min().date()), end=str(prices.index.max().date()))
-    bench = bench["Close"].pct_change().dropna().rename("bench_ret")
-    port_ret_series = (prices.pct_change().dropna() @ (np.repeat(1/prices.shape[1], prices.shape[1]))).rename("port_ret")
-    df_reg = pd.concat([port_ret_series, bench], axis=1).dropna()
-    if len(df_reg) > 30:
-        import statsmodels.api as sm
-        X = sm.add_constant(df_reg["bench_ret"])
-        model = sm.OLS(df_reg["port_ret"], X).fit()
-        st.write(f"Alpha (annualized approx): {(model.params['const']*252):.2%} | Beta: {model.params['bench_ret']:.2f} | R²: {model.rsquared:.2f}")
-    else:
-        st.info("Not enough overlapping data with benchmark.")
-except Exception:
-    st.info("Benchmark fetch failed (network).")
 
 
 # -------- PATH A: Mock trades --------
