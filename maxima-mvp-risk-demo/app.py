@@ -480,12 +480,12 @@ if data_source == "Upload Market CSV (OHLCV)":
                     f"Performance → Return: {mv_ret:.2%} | Vol: {mv_vol:.2%} | Sharpe: {mv_shp:.2f}"
                 )
 
-              # ===== 风险贡献 (MCR/RC) =====
+                      # ===== 风险贡献 (MCR/RC) =====
         st.subheader("Risk Contribution")
 
         rets_full = pivot.pct_change().dropna()
 
-        # 如果资产数小于2，直接提示
+        # 如果资产数小于 2，直接提示
         if rets_full.shape[1] < 2:
             st.info("Need at least 2 symbols for risk contribution.")
         else:
@@ -493,7 +493,7 @@ if data_source == "Upload Market CSV (OHLCV)":
             cov_full = rets_full.cov()
             sym_list = list(pivot.columns)
 
-            # 计算等权权重（如需替换为自定义权重，可修改此行）
+            # 等权权重（如需换成自定义权重，请把 w_eq 替换）
             w_eq = np.repeat(1 / len(sym_list), len(sym_list))
 
             # 组合方差
@@ -505,40 +505,41 @@ if data_source == "Upload Market CSV (OHLCV)":
             # 绝对风险贡献 (RC)
             rc = w_eq * mcr
 
-            # 转换为百分比
+            # 转成百分比
             rc_pct = rc / rc.sum() if rc.sum() != 0 else np.zeros_like(rc)
 
-            # 构建 DataFrame
+            # 构建 DataFrame，并标准化列名（去除隐藏空格）
             rc_df = (
                 pd.DataFrame({
                     "Symbol": sym_list,
                     "RiskContribPct": rc_pct.astype(float)
                 })
                 .sort_values("RiskContribPct", ascending=False)
+                .reset_index(drop=True)
             )
+            rc_df.columns = rc_df.columns.map(lambda s: str(s).strip())
+            rc_df["Symbol"] = rc_df["Symbol"].astype(str)
+            rc_df["RiskContribPct"] = pd.to_numeric(rc_df["RiskContribPct"], errors="coerce").fillna(0.0)
 
-            # 绘制图表（直接传 Series，防止 AttributeError）
-            fig_rc = px.bar(
-                x=rc_df["Symbol"],
-                y=rc_df["RiskContribPct"],
-                labels={"x": "Symbol", "y": "Risk Contribution (%)"}
+            # —— 用 graph_objects 手动绘图，彻底规避 px.bar 的列名解析
+            import plotly.graph_objects as go
+            fig_rc = go.Figure(
+                go.Bar(
+                    x=rc_df["Symbol"].tolist(),
+                    y=rc_df["RiskContribPct"].tolist(),
+                    text=[f"{v*100:.1f}%" for v in rc_df["RiskContribPct"]],
+                    textposition="outside"
+                )
             )
-
-            # 在柱子上方显示百分比
-            fig_rc.update_traces(
-                text=(rc_df["RiskContribPct"] * 100).round(1).astype(str) + "%",
-                textposition="outside"
-            )
-
-            # 坐标轴和布局优化
-            fig_rc.update_yaxes(tickformat=".0%")
+            fig_rc.update_yaxes(title_text="Risk Contribution", tickformat=".0%")
+            fig_rc.update_xaxes(title_text="Symbol")
             fig_rc.update_layout(
                 height=320,
                 margin=dict(l=0, r=0, t=20, b=0),
                 title="Portfolio Risk Contribution (Equal Weight)"
             )
-
             st.plotly_chart(fig_rc, use_container_width=True)
+
 
 
 # -------- PATH A: Mock trades --------
