@@ -463,7 +463,7 @@ if data_source == "Upload Market CSV (OHLCV)":
                 st.dataframe(df_mv.assign(Weight=lambda d: (d["Weight"]*100).round(1)).rename(columns={"Weight":"Weight %"}),
                              use_container_width=True, height=260)
                 st.caption(f"Performance → Return: {mv_ret:.2%} | Vol: {mv_vol:.2%} | Sharpe: {mv_shp:.2f}")
-          else:
+                else:
             st.info("Need at least 2 symbols for Markowitz optimization.")
 
         # ===== 风险贡献 (MCR/RC) =====
@@ -474,20 +474,17 @@ if data_source == "Upload Market CSV (OHLCV)":
             cov_full = rets_full.cov()
             sym_list = list(pivot.columns)
 
-            # 等权权重（或替换成你的自定义权重变量）
+            # 等权权重（或替换成你的自定义权重）
             w_eq = np.repeat(1 / len(sym_list), len(sym_list))
-
             port_var = float(w_eq.T @ cov_full.values @ w_eq)
             mcr = (cov_full.values @ w_eq) / np.sqrt(port_var)
             rc = w_eq * mcr
 
-            # 构建 DataFrame（用不含空格的列名更安全）
             rc_df = (
                 pd.DataFrame({"Symbol": sym_list, "RiskContribPct": rc / rc.sum()})
                 .sort_values("RiskContribPct", ascending=False)
             )
 
-            # 绘制条形图
             fig_rc = px.bar(rc_df, x="Symbol", y="RiskContribPct")
             fig_rc.update_traces(
                 text=(rc_df["RiskContribPct"] * 100).round(1).astype(str) + "%",
@@ -496,7 +493,6 @@ if data_source == "Upload Market CSV (OHLCV)":
             fig_rc.update_yaxes(tickformat=".0%")
             fig_rc.update_layout(height=320, margin=dict(l=0, r=0, t=20, b=0))
             st.plotly_chart(fig_rc, use_container_width=True)
-
         else:
             st.info("Need at least 2 symbols for risk contribution.")
 
