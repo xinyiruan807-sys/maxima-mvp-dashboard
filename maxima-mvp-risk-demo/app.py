@@ -187,11 +187,6 @@ trades, mkt = load_mock_data()
 # =============================== Sidebar ===============================
 with st.sidebar:
     st.header("Investor Controls")
-mktcsv = st.file_uploader(
-    "Upload market CSV (date,symbol,open,high,low,close[,adj_close,volume])",
-    type=["csv"],
-    key="mktcsv_uploader"
-)
 
     # 数据源选择
 data_source = st.radio(
@@ -199,7 +194,11 @@ data_source = st.radio(
     ["Mock demo (trades)", "Upload MT5 OHLCV", "Upload Market CSV (OHLCV)"],
     index=0
 )
-
+mktcsv = st.file_uploader(
+    "Upload market CSV (date,symbol,open,high,low,close[,adj_close,volume])",
+    type=["csv"],
+    key="mktcsv_uploader"
+)
     # 如果 mock 数据缺失，允许上传 Excel
     if trades.empty or mkt.empty:
         xls_up = st.file_uploader("Upload Investor_MockData.xlsx (optional)", type=["xlsx"])
@@ -246,8 +245,6 @@ st.markdown("<h2 style='margin-bottom:0'>Investor Helper – Optimal Strategy Gu
 st.caption("Adjust the risk slider, choose market/time range, and view optimal choices.")
 
 # =============================== Main logic ===============================
-# =============================== Main logic ===============================
-
 # -------- PATH C: Market CSV (OHLCV) upload --------
 if data_source == "Upload Market CSV (OHLCV)" and mktcsv is not None:
     # 读取与清洗
