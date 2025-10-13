@@ -216,8 +216,11 @@ st.markdown("<h2 style='margin-bottom:0'>Investor Helper – Optimal Strategy Gu
 st.caption("Adjust the risk slider, choose market/time range, and view optimal choices.")
 
 # =============================== Main logic ===============================
-# -------- PATH C: Market CSV (OHLCV) upload --------
-if data_source == "Upload Market CSV (OHLCV)" and mktcsv is not None:
+# -------- PATH C: Market CSV upload --------
+if data_source == "Upload Market CSV":
+    if mktcsv is None:
+        st.info("Please upload a market CSV.")
+    else:
     # 读取与清洗
     df_mkt = pd.read_csv(mktcsv)
     needed = {"date","symbol","close"}
