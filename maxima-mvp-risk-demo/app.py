@@ -411,59 +411,6 @@ if data_source == "Upload Market CSV (OHLCV)":
         else:
             st.info("Select at least one symbol to build the portfolio.")
 
-# ===== Optimal Portfolio (Markowitz via PyPortfolioOpt) =====
-from pypfopt.efficient_frontier import EfficientFrontier
-from pypfopt.expected_returns import mean_historical_return
-from pypfopt.risk_models import CovarianceShrinkage
-from pypfopt import plotting
-
-st.subheader("Optimal Portfolio (Markowitz)")
-
-# 使用 px（date×symbol 的 close 透视表）构造历史价格矩阵
-prices = px.copy()
-if prices.shape[1] >= 2:
-    # 期望收益与协方差（使用收缩估计更稳健）
-    mu = mean_historical_return(prices)                # 年化期望收益
-    S  = CovarianceShrinkage(prices).ledoit_wolf()     # 协方差矩阵
-
-    # 最大夏普
-    ef_ms = EfficientFrontier(mu, S)
-    w_ms  = ef_ms.max_sharpe()
-    perf_ms = ef_ms.portfolio_performance()  # (ret, vol, sharpe)
-
-    # 最小方差
-    ef_mv = EfficientFrontier(mu, S)
-    w_mv  = ef_mv.min_volatility()
-    perf_mv = ef_mv.portfolio_performance()
-
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown("**Max Sharpe Weights**")
-        ws = {k: float(v) for k, v in ef_ms.clean_weights().items() if v > 1e-6}
-        ws_df = pd.DataFrame({"Symbol": list(ws.keys()), "Weight": list(ws.values())}).sort_values("Weight", ascending=False)
-        st.dataframe(ws_df.assign(Weight=lambda d: (d["Weight"]*100).round(1)).rename(columns={"Weight":"Weight %"}),
-                     use_container_width=True, height=260)
-        st.caption(f"Performance → Return: {perf_ms[0]:.2%} | Vol: {perf_ms[1]:.2%} | Sharpe: {perf_ms[2]:.2f}")
-
-    with col2:
-        st.markdown("**Min Variance Weights**")
-        wm = {k: float(v) for k, v in ef_mv.clean_weights().items() if v > 1e-6}
-        wm_df = pd.DataFrame({"Symbol": list(wm.keys()), "Weight": list(wm.values())}).sort_values("Weight", ascending=False)
-        st.dataframe(wm_df.assign(Weight=lambda d: (d["Weight"]*100).round(1)).rename(columns={"Weight":"Weight %"}),
-                     use_container_width=True, height=260)
-        st.caption(f"Performance → Return: {perf_mv[0]:.2%} | Vol: {perf_mv[1]:.2%} | Sharpe: {perf_mv[2]:.2f}")
-
-    # 可选：有效前沿图（需要 matplotlib）
-    try:
-        import matplotlib.pyplot as plt
-        fig, ax = plt.subplots(figsize=(5.5,4))
-        plotting.plot_efficient_frontier(EfficientFrontier(mu, S), ax=ax, show_assets=False)
-        ax.set_title("Efficient Frontier")
-        st.pyplot(fig, use_container_width=True)
-    except Exception:
-        pass
-else:
-    st.info("Need at least 2 symbols for Markowitz optimization.")
 
 # ===== Risk Contribution (谁贡献了组合波动) =====
 st.subheader("Risk Contribution")
