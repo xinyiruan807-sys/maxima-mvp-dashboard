@@ -327,6 +327,117 @@ if data_source == "Upload Market CSV (OHLCV)" and mktcsv is not None:
             fig.add_trace(go.Scatter(x=dd0.index, y=dd0, mode="lines", name="Drawdown"))
         fig.update_layout(margin=dict(l=0,r=0,t=20,b=0), height=360, legend_title_text="")
         st.plotly_chart(fig, use_container_width=True)
+      
+# ===== Portfolio Backtest (Equal / Custom Weights) =====
+st.subheader("Portfolio Backtest")
+
+# —— 权重设置（等权 / 自定义 JSON）
+st.markdown("**Weights**")
+wmode = st.radio("Weighting", ["Equal weight", "Custom JSON"], horizontal=True, key="wmode_csv")
+w_text = st.text_input(
+    'Custom weights JSON (e.g. {"AAPL":0.3,"BTC-USD":0.2,"XAUUSD=X":0.5})',
+    value="", placeholder='{"AAPL":0.3,"BTC-USD":0.2}'
+)
+
+def make_weights(symbols: list[str], mode: str, text: str) -> dict[str, float]:
+    # 等权
+    if mode == "Equal weight" or not text.strip():
+        n = len(symbols)
+        return {s: (1.0 / n if n > 0 else 0.0) for s in symbols}
+    # 解析自定义 JSON
+    try:
+        raw = json.loads(text)
+        w = {s: float(raw.get(s, 0.0)) for s in symbols}
+        ssum = sum(v for v in w.values() if v > 0)
+        if ssum <= 0:
+            raise ValueError("sum<=0")
+        # 负数当 0 处理并归一化
+        w = {k: max(0.0, v) / ssum for k, v in w.items()}
+        # 提示被忽略的无效符号
+        extra = [k for k in raw.keys() if k not in symbols]
+        if extra:
+            st.info(f"Ignored symbols not in selection: {extra}")
+        return w
+    except Exception:
+        st.warning("Invalid JSON weights. Fallback to equal weight.")
+        n = len(symbols)
+        return {s: (1.0 / n if n > 0 else 0.0) for s in symbols}
+
+# —— 价格 → 收益 → 组合净值
+px = view.pivot_table(index="date", columns="symbol", values="close").sort_index()
+# 组合需要同一天都有价格的资产行；行有缺失则剔除
+px = px.dropna(axis=0, how="any")
+
+if px.shape[1] >= 1:
+    symbols_in_view = list(px.columns)
+    weights = make_weights(symbols_in_view, wmode, w_text)
+    w_vec = np.array([weights.get(s, 0.0) for s in symbols_in_view])
+    if w_vec.sum() == 0:
+        st.info("All weights are zero. Please adjust.")
+    else:
+        w_vec = w_vec / w_vec.sum()
+        ret_mat = px.pct_change().dropna()
+        port_ret = pd.Series(ret_mat.values @ w_vec, index=ret_mat.index, name="port_ret")
+        port_eq  = (1 + port_ret).cumprod()                # 组合净值
+        port_dd  = (port_eq / port_eq.cummax() - 1.0)      # 回撤
+
+        # —— 组合指标
+        def _ann_vol(r):
+            r = r.dropna()
+            return float(r.std(ddof=1) * np.sqrt(252)) if len(r) > 1 else None
+        def _sharpe(r):
+            r = r.dropna()
+            vol = r.std(ddof=1) * np.sqrt(252)
+            return float((r.mean() * 252) / vol) if (len(r) > 1 and vol > 0) else None
+
+        cA, cB, cC, cD = st.columns(4)
+        cA.metric("Portfolio Return", f"{(port_eq.iloc[-1] - 1)*100:.1f}%")
+        vol_ann = _ann_vol(port_ret);  cB.metric("Volatility (ann.)", f"{(vol_ann*100):.1f}%" if vol_ann is not None else "–")
+        shp = _sharpe(port_ret);       cC.metric("Sharpe", f"{shp:.2f}" if shp is not None else "–")
+        cD.metric("Max Drawdown", f"{port_dd.min()*100:.1f}%")
+
+        # —— 组合净值曲线
+        fig_port = go.Figure()
+        fig_port.add_trace(go.Scatter(x=port_eq.index, y=port_eq, mode="lines", name="Portfolio NAV"))
+        fig_port.update_layout(margin=dict(l=0, r=0, t=20, b=0), height=340, legend_title_text="")
+        st.plotly_chart(fig_port, use_container_width=True)
+
+        # —— 单资产 vs 组合 指标表
+        rows = []
+        for sym in symbols_in_view:
+            r = px[sym].pct_change().dropna()
+            eq = (1 + r).cumprod()
+            dd = (eq / eq.cummax() - 1.0).min() if len(eq) else np.nan
+            rows.append({
+                "Symbol": sym,
+                "Weight": f"{weights.get(sym,0.0)*100:.1f}%",
+                "Return %": (eq.iloc[-1] - 1) * 100 if len(eq) else np.nan,
+                "Vol %": _ann_vol(r) * 100 if _ann_vol(r) is not None else np.nan,
+                "Sharpe": _sharpe(r),
+                "MaxDD %": dd * 100 if pd.notna(dd) else np.nan
+            })
+        rows.append({
+            "Symbol": "Portfolio",
+            "Weight": "—",
+            "Return %": (port_eq.iloc[-1] - 1) * 100,
+            "Vol %": vol_ann * 100 if vol_ann is not None else np.nan,
+            "Sharpe": shp,
+            "MaxDD %": port_dd.min() * 100
+        })
+        tbl = pd.DataFrame(rows).round({"Return %": 2, "Vol %": 2, "Sharpe": 2, "MaxDD %": 2})
+        st.dataframe(tbl, use_container_width=True, height=300)
+
+        # —— 导出当前视图（过滤后的行）
+        st.download_button(
+            "Download current view (CSV)",
+            data=view.to_csv(index=False).encode("utf-8"),
+            file_name="market_view_filtered.csv",
+            mime="text/csv"
+        )
+else:
+    st.info("Select at least one symbol to build the portfolio.")
+
+
 
 # -------- PATH B: MT5 OHLCV upload --------
 if data_source.startswith("Upload") and uploaded is not None:
