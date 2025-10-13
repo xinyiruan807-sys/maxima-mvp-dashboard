@@ -187,9 +187,18 @@ trades, mkt = load_mock_data()
 # =============================== Sidebar ===============================
 with st.sidebar:
     st.header("Investor Controls")
+mktcsv = st.file_uploader(
+    "Upload market CSV (date,symbol,open,high,low,close[,adj_close,volume])",
+    type=["csv"],
+    key="mktcsv_uploader"
+)
 
     # 数据源选择
-    data_source = st.radio("Data source", ["Mock demo (trades)", "Upload MT5 OHLCV"], index=0)
+data_source = st.radio(
+    "Data source",
+    ["Mock demo (trades)", "Upload MT5 OHLCV", "Upload Market CSV (OHLCV)"],
+    index=0
+)
 
     # 如果 mock 数据缺失，允许上传 Excel
     if trades.empty or mkt.empty:
@@ -237,6 +246,91 @@ st.markdown("<h2 style='margin-bottom:0'>Investor Helper – Optimal Strategy Gu
 st.caption("Adjust the risk slider, choose market/time range, and view optimal choices.")
 
 # =============================== Main logic ===============================
+# =============================== Main logic ===============================
+
+# -------- PATH C: Market CSV (OHLCV) upload --------
+if data_source == "Upload Market CSV (OHLCV)" and mktcsv is not None:
+    # 读取与清洗
+    df_mkt = pd.read_csv(mktcsv)
+    needed = {"date","symbol","close"}
+    miss = needed - set(df_mkt.columns)
+    if miss:
+        st.error(f"CSV 缺少列：{sorted(list(miss))} ；至少需要 date,symbol,close。")
+        st.stop()
+
+    df_mkt["date"] = pd.to_datetime(df_mkt["date"], errors="coerce")
+    df_mkt = df_mkt.dropna(subset=["date","symbol","close"]).sort_values(["symbol","date"])
+    # 若没有 adj_close / volume，补空列（不影响显示）
+    if "adj_close" not in df_mkt.columns: df_mkt["adj_close"] = df_mkt["close"]
+    if "volume" not in df_mkt.columns:    df_mkt["volume"] = pd.NA
+
+    st.success(f"✅ Loaded {len(df_mkt):,} rows • {df_mkt['symbol'].nunique()} symbols")
+
+    # 选择资产 & 时间
+    all_syms = sorted(df_mkt["symbol"].unique())
+    pick = st.multiselect("Symbols", all_syms, default=all_syms[:min(5,len(all_syms))])
+    dmin, dmax = df_mkt["date"].min(), df_mkt["date"].max()
+    dr = st.slider("Date range", min_value=dmin.to_pydatetime(), max_value=dmax.to_pydatetime(),
+                   value=(dmin.to_pydatetime(), dmax.to_pydatetime()))
+
+    view = df_mkt[(df_mkt["symbol"].isin(pick)) & (df_mkt["date"].between(dr[0], dr[1]))].copy()
+
+    # 价格曲线（多资产）
+    st.subheader("Close Price (multi-asset)")
+    pivot = view.pivot_table(index="date", columns="symbol", values="close")
+    st.line_chart(pivot, use_container_width=True)
+
+    # 快速指标表（复用你已定义的工具函数）
+    st.subheader("Quick Metrics")
+    rows = []
+    for sym in pick:
+        sub = view[view["symbol"]==sym].set_index("date").sort_index()
+        r = pct_returns_from_price(sub["close"])
+        cr = cum_return(r)
+        dd = drawdown_curve(r)
+        rows.append({
+            "Symbol": sym,
+            "Total Return": f"{(cr.iloc[-1]*100):.1f}%" if len(cr) else None,
+            "Vol (ann.)":   f"{(annualized_vol(r)*100):.1f}%" if len(r.dropna()) else None,
+            "Sharpe":       f"{sharpe_ratio(r):.2f}" if len(r.dropna()) else None,
+            "Max DD":       f"{(dd.min()*100):.1f}%" if len(dd.dropna()) else None
+        })
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, height=260)
+
+    # 单资产视图 + Rolling 指标
+    if pick:
+        sym0 = pick[0]
+        sub0 = view[view["symbol"]==sym0].set_index("date").sort_index()
+        r0 = pct_returns_from_price(sub0["close"])
+        cr0 = cum_return(r0)
+        dd0 = drawdown_curve(r0)
+
+        colA, colB, colC, colD = st.columns(4)
+        with colA:
+            st.metric("Total Return", f"{(cr0.iloc[-1] if len(cr0) else 0)*100:.1f}%")
+            st.plotly_chart(tiny_sparkline(cr0.dropna()), use_container_width=True)
+        with colB:
+            st.metric("Volatility (ann.)", f"{annualized_vol(r0):.2%}")
+            st.plotly_chart(tiny_sparkline(rolling_stat(r0, 30, 'vol').dropna()), use_container_width=True)
+        with colC:
+            st.metric("Sharpe", f"{sharpe_ratio(r0):.2f}")
+            st.plotly_chart(tiny_sparkline(rolling_stat(r0, 30, 'sharpe').dropna()), use_container_width=True)
+        with colD:
+            st.metric("Max Drawdown", f"{dd0.min():.2%}")
+            st.plotly_chart(tiny_sparkline(dd0.dropna()), use_container_width=True)
+
+        st.subheader(f"{sym0} — Price / CumReturn / Drawdown")
+        toggle = st.radio("View", ["Price","Cumulative Return","Drawdown"], horizontal=True, key="csv_view")
+        fig = go.Figure()
+        if toggle == "Price":
+            fig.add_trace(go.Scatter(x=sub0.index, y=sub0["close"], mode="lines", name="Price"))
+        elif toggle == "Cumulative Return":
+            fig.add_trace(go.Scatter(x=cr0.index, y=cr0, mode="lines", name="CumReturn"))
+        else:
+            fig.add_trace(go.Scatter(x=dd0.index, y=dd0, mode="lines", name="Drawdown"))
+        fig.update_layout(margin=dict(l=0,r=0,t=20,b=0), height=360, legend_title_text="")
+        st.plotly_chart(fig, use_container_width=True)
+
 # -------- PATH B: MT5 OHLCV upload --------
 if data_source.startswith("Upload") and uploaded is not None:
     try:
