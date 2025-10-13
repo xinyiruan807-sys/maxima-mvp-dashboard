@@ -411,6 +411,77 @@ if data_source == "Upload Market CSV (OHLCV)":
         else:
             st.info("Select at least one symbol to build the portfolio.")
 
+        # ===== Markowitz (SciPy) —— 无需 pypfopt =====
+        st.subheader("Optimal Portfolio (Markowitz)")
+        from math import sqrt
+        from scipy.optimize import minimize
+
+        prices = pivot.copy()  # 这里直接用 pivot（date×symbol 的 close）
+        if prices.shape[1] >= 2:
+            rets = prices.pct_change().dropna()
+            mu_daily = rets.mean()
+            mu_ann   = mu_daily * 252
+            cov      = rets.cov() * 252
+            n        = prices.shape[1]
+            syms     = list(prices.columns)
+
+            cons = ({'type': 'eq', 'fun': lambda w: np.sum(w) - 1.0},)
+            bounds = tuple((0.0, 1.0) for _ in range(n))
+            w0 = np.repeat(1.0/n, n)
+
+            def port_stats(w):
+                ret = float(mu_ann @ w)
+                vol = float(sqrt(w @ cov.values @ w))
+                shp = (ret/vol) if vol>0 else 0.0
+                return ret, vol, shp
+
+            def f_min_var(w):  # 最小方差
+                return float(w @ cov.values @ w)
+
+            res_mv = minimize(f_min_var, w0, bounds=bounds, constraints=cons, method="SLSQP")
+            w_mv = res_mv.x if res_mv.success else w0
+            mv_ret, mv_vol, mv_shp = port_stats(w_mv)
+
+            def f_max_sharpe(w):  # 最大夏普 = 最小化 -Sharpe
+                ret, vol, _ = port_stats(w)
+                return -ret/vol if vol>0 else 1e9
+
+            res_ms = minimize(f_max_sharpe, w0, bounds=bounds, constraints=cons, method="SLSQP")
+            w_ms = res_ms.x if res_ms.success else w0
+            ms_ret, ms_vol, ms_shp = port_stats(w_ms)
+
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown("**Max Sharpe Weights**")
+                df_ms = pd.DataFrame({"Symbol": syms, "Weight": w_ms}).sort_values("Weight", ascending=False)
+                st.dataframe(df_ms.assign(Weight=lambda d: (d["Weight"]*100).round(1)).rename(columns={"Weight":"Weight %"}),
+                             use_container_width=True, height=260)
+                st.caption(f"Performance → Return: {ms_ret:.2%} | Vol: {ms_vol:.2%} | Sharpe: {ms_shp:.2f}")
+            with col2:
+                st.markdown("**Min Variance Weights**")
+                df_mv = pd.DataFrame({"Symbol": syms, "Weight": w_mv}).sort_values("Weight", ascending=False)
+                st.dataframe(df_mv.assign(Weight=lambda d: (d["Weight"]*100).round(1)).rename(columns={"Weight":"Weight %"}),
+                             use_container_width=True, height=260)
+                st.caption(f"Performance → Return: {mv_ret:.2%} | Vol: {mv_vol:.2%} | Sharpe: {mv_shp:.2f}")
+        else:
+            st.info("Need at least 2 symbols for Markowitz optimization.")
+
+        # ===== 风险贡献 (MCR/RC) =====
+        st.subheader("Risk Contribution")
+        rets_full = pivot.pct_change().dropna()
+        if rets_full.shape[1] >= 2:
+            cov_full = rets_full.cov()
+            sym_list = list(pivot.columns)
+            w_eq = np.repeat(1/len(sym_list), len(sym_list))
+            port_var = float(w_eq.T @ cov_full.values @ w_eq)
+            mcr = (cov_full.values @ w_eq) / np.sqrt(port_var)
+            rc  = w_eq * mcr
+            rc_df = pd.DataFrame({"Symbol": sym_list, "RiskContrib %": rc/rc.sum()}).sort_values("RiskContrib %", ascending=False)
+            fig_rc = px.bar(rc_df, x="Symbol", y="RiskContrib %", text_auto=".1%")
+            fig_rc.update_yaxes(tickformat=".0%"); fig_rc.update_layout(height=320, margin=dict(l=0,r=0,t=20,b=0))
+            st.plotly_chart(fig_rc, use_container_width=True)
+        else:
+            st.info("Need at least 2 symbols for risk contribution.")
 
 
 # -------- PATH A: Mock trades --------
