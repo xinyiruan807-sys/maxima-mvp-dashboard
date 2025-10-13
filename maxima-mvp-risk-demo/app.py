@@ -450,14 +450,18 @@ if data_source == "Upload Market CSV (OHLCV)":
             w_ms = res_ms.x if res_ms.success else w0
             ms_ret, ms_vol, ms_shp = port_stats(w_ms)
 
-            col1, col2 = st.columns(2)
-            with col1:
-                st.markdown("**Max Sharpe Weights**")
-                df_ms = pd.DataFrame({"Symbol": syms, "Weight": w_ms}).sort_values("Weight", ascending=False)
-                st.dataframe(df_ms.assign(Weight=lambda d: (d["Weight"]*100).round(1)).rename(columns={"Weight":"Weight %"}),
-                             use_container_width=True, height=260)
-                st.caption(f"Performance → Return: {ms_ret:.2%} | Vol: {ms_vol:.2%} | Sharpe: {ms_shp:.2f}")
-            with col2:
+                    col1, col2 = st.columns(2)
+
+        with col1:
+            st.markdown("**Max Sharpe Weights**")
+            df_ms = pd.DataFrame({"Symbol": syms, "Weight": w_ms}).sort_values("Weight", ascending=False)
+            st.dataframe(
+                df_ms.assign(Weight=lambda d: (d["Weight"] * 100).round(1)).rename(columns={"Weight": "Weight %"}),
+                use_container_width=True, height=260
+            )
+            st.caption(f"Performance → Return: {ms_ret:.2%} | Vol: {ms_vol:.2%} | Sharpe: {ms_shp:.2f}")
+
+        with col2:
             st.markdown("**Min Variance Weights**")
             df_mv = pd.DataFrame({"Symbol": syms, "Weight": w_mv}).sort_values("Weight", ascending=False)
             st.dataframe(
@@ -469,7 +473,6 @@ if data_source == "Upload Market CSV (OHLCV)":
     else:
         st.info("Need at least 2 symbols for Markowitz optimization.")
 
-
     # ===== 风险贡献 (MCR/RC) =====
     st.subheader("Risk Contribution")
 
@@ -478,12 +481,12 @@ if data_source == "Upload Market CSV (OHLCV)":
         cov_full = rets_full.cov()
         sym_list = list(pivot.columns)
 
-        # 等权权重（或替换成你的自定义权重）
+        # 等权权重（如需改用自定义权重，可替换 w_eq）
         w_eq = np.repeat(1 / len(sym_list), len(sym_list))
+
         port_var = float(w_eq.T @ cov_full.values @ w_eq)
         mcr = (cov_full.values @ w_eq) / np.sqrt(port_var)
         rc = w_eq * mcr
-
         rc_df = (
             pd.DataFrame({"Symbol": sym_list, "RiskContribPct": rc / rc.sum()})
             .sort_values("RiskContribPct", ascending=False)
@@ -499,6 +502,7 @@ if data_source == "Upload Market CSV (OHLCV)":
         st.plotly_chart(fig_rc, use_container_width=True)
     else:
         st.info("Need at least 2 symbols for risk contribution.")
+
 
 # -------- PATH A: Mock trades --------
 elif data_source == "Mock demo (trades)":
