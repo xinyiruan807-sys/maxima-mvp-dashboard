@@ -82,9 +82,11 @@ df_mkt = load_market_csv()
 
 # ------------------------ Sidebar ------------------------
 with st.sidebar:
-    st.header("Controls")
+    st.header("Investor Controls")
+    st.caption("Using auto-updated market data (data/market_latest.csv)")
     if df_mkt.empty:
-        st.warning("No market data found. Ensure GitHub Actions has produced data/data/market_latest.csv")
+        st.warning("No market data found. Ensure GitHub Actions has produced data/market_latest.csv")
+        pick, dr, mode, w_text = [], None, "Equal", ""
     else:
         all_syms = sorted(df_mkt["symbol"].unique().tolist())
         default_syms = all_syms[: min(6, len(all_syms))]
@@ -113,10 +115,10 @@ if df_mkt.empty:
     st.stop()
 
 # filter view
-pick = pick if 'pick' in locals() and pick else sorted(df_mkt["symbol"].unique().tolist())[:6]
+pick = pick if pick else sorted(df_mkt["symbol"].unique().tolist())[:6]
 view = df_mkt[
     (df_mkt["symbol"].isin(pick)) &
-    (df_mkt["date"].between(pd.to_datetime(dr[0]), pd.to_datetime(dr[1])) if 'dr' in locals() else True)
+    (df_mkt["date"].between(pd.to_datetime(dr[0]), pd.to_datetime(dr[1])) if dr else True)
 ].copy()
 
 if view.empty:
