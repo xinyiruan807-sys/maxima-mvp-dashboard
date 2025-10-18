@@ -40,11 +40,30 @@ def sharpe(r: pd.Series, per_year: int = 252) -> float:
 
 @st.cache_data(show_spinner=False)
 def load_market_csv() -> pd.DataFrame:
-    """Load the auto-updated CSV; fallback to empty if missing."""
-    base = Path(__file__).parent
-    csv_path = base / "data" / "market_latest.csv"
-    if not csv_path.exists():
+    """
+    Load the auto-updated CSV with robust path resolution (works on Streamlit Cloud and local).
+    Tries multiple candidate paths and shows which one is used.
+    """
+    base = Path(__file__).parent          # e.g., <repo>/maxima-mvp-risk-demo/
+    cwd  = Path.cwd()                     # repo root on Streamlit Cloud
+
+    candidates = [
+        base / "data" / "market_latest.csv",                       # preferred
+        cwd / "maxima-mvp-risk-demo" / "data" / "market_latest.csv",
+        cwd / "data" / "market_latest.csv",                        # fallback if placed at repo root
+    ]
+
+    csv_path = None
+    for p in candidates:
+        if p.exists():
+            csv_path = p
+            break
+
+    st.caption(f"CSV path resolved: {csv_path if csv_path else 'NOT FOUND'}")  # for debugging
+
+    if not csv_path:
         return pd.DataFrame()
+
     df = pd.read_csv(csv_path)
     # normalize
     colmap = {
