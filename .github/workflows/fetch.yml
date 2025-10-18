@@ -1,31 +1,49 @@
 name: fetch_market_data
+
 on:
   schedule:
-    - cron: "15 7 * * 1-5"     # 每个工作日 07:15 UTC 跑
-  workflow_dispatch:
+    - cron: "15 7 * * *"          # ✅ 每天 07:15 UTC 运行（含周末）
+  workflow_dispatch:               # 允许手动触发
 
 jobs:
   fetch:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write              # 允许往仓库提交文件
+
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: "3.11" }
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
           pip install -r maxima-mvp-risk-demo/requirements.txt
-      - name: Fetch Yahoo data
-        env:
-          TICKERS: "AAPL,MSFT,GOOGL,AMZN,META,NVDA,TSLA,SPY,QQQ,TLT,IEF,GLD"
+
+      - name: Fetch Yahoo data (from tickers.txt)
         run: |
           python maxima-mvp-risk-demo/scripts/fetch_market.py \
+            --universe maxima-mvp-risk-demo/tickers.txt \
             --out maxima-mvp-risk-demo/data/market_latest.csv \
             --start 2018-01-01 --incremental
+          echo "Rows in CSV:" $(wc -l < maxima-mvp-risk-demo/data/market_latest.csv)
+
+      # 可选：保存每日快照（不需要就删掉这个 step 以及下方 git add 的 history 路径）
+      - name: Save daily snapshot (optional)
+        run: |
+          mkdir -p maxima-mvp-risk-demo/data/history
+          cp maxima-mvp-risk-demo/data/market_latest.csv \
+             maxima-mvp-risk-demo/data/history/$(date -u +%F).csv
+
       - name: Commit updated CSV
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
-          git add maxima-mvp-risk-demo/data/market_latest.csv
-          git commit -m "auto: update market data" || echo "No changes"
+          git add maxima-mvp-risk-demo/data/market_latest.csv \
+                 maxima-mvp-risk-demo/data/history/*.csv 2>/dev/null || true
+          git commit -m "auto: update market data (+ snapshot)" || echo "No changes"
           git push
