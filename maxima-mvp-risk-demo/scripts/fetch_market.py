@@ -2,10 +2,11 @@
 # -*- coding: utf-8 -*-
 """
 Robust market fetcher for GitHub Actions
-- Primary: yahooquery (更抗限流/反爬)
-- Fallback: yfinance (带 UA + HTTP 重试)
+- Primary: yahooquery（更抗限流/反爬）
+- Fallback: yfinance（带 UA + HTTP 重试）
 - Output: tidy CSV -> date,ticker,open,high,low,close,adj_close,volume
 - Incremental de-dup (date+ticker)
+
 Usage:
   python scripts/fetch_market.py --universe maxima-mvp-risk-demo/tickers.txt \
     --out maxima-mvp-risk-demo/data/market_latest.csv --start 2022-01-01 --incremental
@@ -19,7 +20,6 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-# libs
 import yahooquery as yq
 import yfinance as yf
 
@@ -53,7 +53,7 @@ def build_session() -> requests.Session:
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--out", default="data/market_latest.csv")
-    p.add_argument("--start", default="2022-01-01")   # 先短一点保证通路；成功后你可改回 2018-01-01
+    p.add_argument("--start", default="2022-01-01")   # 先短一点，通路验证更稳；成功后可改回 2018-01-01
     p.add_argument("--end", default=None)
     p.add_argument("--tickers", default=None)
     p.add_argument("--universe", default="tickers.txt")
@@ -101,8 +101,8 @@ def _normalize(df: pd.DataFrame, ticker: str) -> pd.DataFrame:
 
 # ---------------- Fetchers ----------------
 def fetch_with_yahooquery(tickers: List[str], start: str, end: Optional[str]) -> pd.DataFrame:
-    # yahooquery 一次性拿全量，返回 MultiIndex，较稳定
-    tq = yq.Ticker(tickers, backoff_factor=0.8, max_retries=5)
+    """首选：yahooquery（默认重试，CI 环境更稳）"""
+    tq = yq.Ticker(tickers)  # ← 关键修正：不再传 backoff_factor / max_retries
     hist = tq.history(start=start, end=end, interval="1d", adj_close=True)
     if isinstance(hist, pd.DataFrame) and not hist.empty:
         frames = []
@@ -110,16 +110,18 @@ def fetch_with_yahooquery(tickers: List[str], start: str, end: Optional[str]) ->
             # index: (symbol, date)
             hist = hist.reset_index()
             for t in tickers:
-                df_t = hist[hist["symbol"].str.upper() == t.upper()][["date","open","high","low","close","adjclose","volume"]].copy()
+                df_t = hist[hist["symbol"].str.upper() == t.upper()][
+                    ["date","open","high","low","close","adjclose","volume"]
+                ].copy()
                 frames.append(_normalize(df_t, t))
         else:
-            # 单票返回
             frames.append(_normalize(hist, tickers[0]))
         return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
     return pd.DataFrame()
 
-def fetch_with_yfinance_fallback(tickers: List[str], start: str, end: Optional[str], session: requests.Session,
-                                 max_retries: int, sleep_sec: float) -> pd.DataFrame:
+def fetch_with_yfinance_fallback(tickers: List[str], start: str, end: Optional[str],
+                                 session: requests.Session, max_retries: int, sleep_sec: float) -> pd.DataFrame:
+    """兜底：单票 yfinance + UA + HTTP 重试"""
     frames = []
     for t in tickers:
         ok = False
@@ -170,7 +172,7 @@ def main():
     df = fetch_with_yahooquery(tickers, args.start, end)
     if df.empty:
         logging.warning("yahooquery returned empty. Trying yfinance fallback...")
-        # 2) yfinance 兜底（带 UA+重试）
+        # 2) yfinance 兜底（带 UA + 重试）
         session = build_session()
         df = fetch_with_yfinance_fallback(tickers, args.start, end, session, args.max_retries, args.sleep)
 
@@ -198,3 +200,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
