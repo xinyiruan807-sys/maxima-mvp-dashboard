@@ -89,9 +89,13 @@ def _normalize(df: pd.DataFrame, ticker: str) -> pd.DataFrame:
         "volume":"volume","Volume":"volume",
         "date":"date","Date":"date"
     })
-    if "date" not in df.columns:
+    if "date" not in df.columns:  # history() 有时把日期放在 index
         df = df.reset_index().rename(columns={"index":"date"})
-    df["date"] = pd.to_datetime(df["date"], errors="coerce").dt.tz_localize(None).dt.date
+    # 关键修复：先统一解析为 UTC（兼容 tz-aware/naive 混合），再去掉时区
+    s = pd.to_datetime(df["date"], errors="coerce", utc=True)
+    s = s.dt.tz_convert(None)  # drop timezone
+    df["date"] = s.dt.date
+
     df["ticker"] = ticker
     for c in ["open","high","low","close","adj_close","volume"]:
         if c not in df.columns:
@@ -102,8 +106,7 @@ def _normalize(df: pd.DataFrame, ticker: str) -> pd.DataFrame:
 # ---------------- Fetchers ----------------
 def fetch_with_yahooquery(tickers: List[str], start: str, end: Optional[str]) -> pd.DataFrame:
     """首选：yahooquery（默认重试，CI 环境更稳）"""
-    tq = yq.Ticker(tickers)  # 重要：不传 backoff_factor / max_retries
-    # NOTE: yahooquery.history 没有 adj_close 参数
+    tq = yq.Ticker(tickers)  # 不传 backoff_factor / max_retries
     hist = tq.history(start=start, end=end, interval="1d")
     if isinstance(hist, pd.DataFrame) and not hist.empty:
         frames = []
@@ -146,7 +149,7 @@ def read_existing(path: str) -> pd.DataFrame:
     if os.path.exists(path):
         try:
             df = pd.read_csv(path, parse_dates=["date"])
-            df["date"] = pd.to_datetime(df["date"]).dt.tz_localize(None).dt.date
+            df["date"] = pd.to_datetime(df["date"], errors="coerce", utc=True).dt.tz_convert(None).dt.date
             return df
         except Exception as e:
             logging.warning(f"Failed to read existing CSV ({path}): {e}")
