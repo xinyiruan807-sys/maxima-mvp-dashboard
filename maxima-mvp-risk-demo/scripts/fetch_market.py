@@ -53,7 +53,7 @@ def build_session() -> requests.Session:
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--out", default="data/market_latest.csv")
-    p.add_argument("--start", default="2022-01-01")   # 先短一点，通路验证更稳；成功后可改回 2018-01-01
+    p.add_argument("--start", default="2022-01-01")   # 验证通路更稳；成功后可改更早
     p.add_argument("--end", default=None)
     p.add_argument("--tickers", default=None)
     p.add_argument("--universe", default="tickers.txt")
@@ -102,8 +102,9 @@ def _normalize(df: pd.DataFrame, ticker: str) -> pd.DataFrame:
 # ---------------- Fetchers ----------------
 def fetch_with_yahooquery(tickers: List[str], start: str, end: Optional[str]) -> pd.DataFrame:
     """首选：yahooquery（默认重试，CI 环境更稳）"""
-    tq = yq.Ticker(tickers)  # ← 关键修正：不再传 backoff_factor / max_retries
-    hist = tq.history(start=start, end=end, interval="1d", adj_close=True)
+    tq = yq.Ticker(tickers)  # 重要：不传 backoff_factor / max_retries
+    # NOTE: yahooquery.history 没有 adj_close 参数
+    hist = tq.history(start=start, end=end, interval="1d")
     if isinstance(hist, pd.DataFrame) and not hist.empty:
         frames = []
         if isinstance(hist.index, pd.MultiIndex):
