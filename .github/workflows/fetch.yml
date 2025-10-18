@@ -29,7 +29,7 @@ jobs:
           python maxima-mvp-risk-demo/scripts/fetch_market.py \
             --universe maxima-mvp-risk-demo/tickers.txt \
             --out maxima-mvp-risk-demo/data/market_latest.csv \
-            --start 2018-01-01 --incremental
+            --start 2022-01-01 --incremental
           echo "Rows in CSV:" $(wc -l < maxima-mvp-risk-demo/data/market_latest.csv)
 
       # 可选：保存每日快照（不需要就删掉这个 step 以及下方 git add 的 history 路径）
