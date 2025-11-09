@@ -424,6 +424,52 @@ if px_clean.shape[1] >= 1:
         with st.expander("Preview JSON profile"):
             st.json(profile, expanded=False)
 
+# ------------------------ AI Integration ------------------------
+st.subheader("AI Assistant")
+
+# Natural language query input
+user_query = st.text_input("Ask a question about your portfolio or the market:", "")
+
+if user_query:
+    try:
+        import openai
+        import os
+        openai.api_key = os.environ.get("OPENAI_API_KEY")
+        if openai.api_key:
+            response = openai.ChatCompletion.create(
+                model="gpt-4",
+                messages=[
+                    {"role": "system", "content": "You are a helpful financial assistant for the Maxima dashboard."},
+                    {"role": "user", "content": user_query}
+                ],
+                temperature=0.5,
+                max_tokens=200
+            )
+            answer = response.choices[0].message.content
+            st.markdown(answer)
+        else:
+            st.warning("OpenAI API key is not configured. Please set OPENAI_API_KEY environment variable.")
+    except Exception as e:
+        st.error(f"Error calling OpenAI API: {e}")
+
+
+def generate_auto_insights(df: pd.DataFrame) -> list[str]:
+    """
+    TODO: Implement automatic insights generation based on investment data.
+    Returns a list of insight strings.
+    """
+    # Placeholder implementation
+    return []
+
+
+def predict_future_metrics(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    TODO: Implement predictive analytics for risk and performance metrics.
+    Returns a dataframe with predicted metrics.
+    """
+    # Placeholder implementation
+    return pd.DataFrame()
+
         # Explain button (mock GPT)
         if st.button("Explain this portfolio"):
             explanation = explain_portfolio(profile)
