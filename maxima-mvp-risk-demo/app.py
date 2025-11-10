@@ -1,3 +1,44 @@
+# ------------------- Data Upload & AI Analysis -------------------
+st.subheader("Data Upload & AI Analysis")
+
+uploaded_file = st.file_uploader("Upload a CSV or Excel file for analysis", type=["csv", "xlsx"])
+if uploaded_file is not None:
+    try:
+        # Read uploaded file depending on extension
+        if uploaded_file.name.endswith(".csv"):
+            df_uploaded = pd.read_csv(uploaded_file)
+        else:
+            df_uploaded = pd.read_excel(uploaded_file)
+        # Show data preview
+        st.write("### Data Preview", df_uploaded.head())
+        # Show summary statistics
+        st.write("### Summary Statistics", df_uploaded.describe(include='all'))
+        # AI summarization button
+        if st.button("Generate AI Summary"):
+            # Check for OpenAI API key
+            openai.api_key = os.environ.get("OPENAI_API_KEY")
+            if openai.api_key:
+                # Convert first 100 rows to JSON for summarization
+                sample_json = df_uploaded.head(100).to_json(orient="records")
+                prompt = f"Provide a concise summary of the following dataset: {sample_json}"
+                try:
+                    response = openai.ChatCompletion.create(
+                        model="gpt-4",
+                        messages=[
+                            {"role": "system", "content": "You are a helpful data analyst."},
+                            {"role": "user", "content": prompt},
+                        ],
+                        temperature=0.3,
+                        max_tokens=200,
+                    )
+                    summary = response.choices[0].message.content
+                    st.markdown(summary)
+                except Exception as e:
+                    st.error(f"Error during AI summarization: {e}")
+            else:
+                st.warning("OpenAI API key is not configured. Please set OPENAI_API_KEY environment variable.")
+    except Exception as e:
+        st.error(f"Error reading uploaded file: {e}")
 # app.py — Maxima Wealth Dashboard (Market-only, auto-updated CSV)
 # Data source: maxima-mvp-risk-demo/data/market_latest.csv (updated by GitHub Actions)
 # Requirements: streamlit, pandas, numpy, plotly
@@ -484,3 +525,45 @@ def predict_future_metrics(df: pd.DataFrame) -> pd.DataFrame:
         )
 
 st.caption("Data auto-updated daily via GitHub Actions → data/market_latest.csv")
+
+# ------------------- Data Upload & AI Analysis -------------------
+st.subheader("Data Upload & AI Analysis")
+
+uploaded_file = st.file_uploader("Upload a CSV or Excel file for analysis", type=["csv", "xlsx"])
+if uploaded_file is not None:
+    try:
+        # Read uploaded file depending on extension
+        if uploaded_file.name.endswith(".csv"):
+            df_uploaded = pd.read_csv(uploaded_file)
+        else:
+            df_uploaded = pd.read_excel(uploaded_file)
+        # Show data preview
+        st.write("### Data Preview", df_uploaded.head())
+        # Show summary statistics
+        st.write("### Summary Statistics", df_uploaded.describe(include='all'))
+        # AI summarization button
+        if st.button("Generate AI Summary"):
+            # Check for OpenAI API key
+            openai.api_key = os.environ.get("OPENAI_API_KEY")
+            if openai.api_key:
+                # Convert first 100 rows to JSON for summarization
+                sample_json = df_uploaded.head(100).to_json(orient="records")
+                prompt = f"Provide a concise summary of the following dataset: {sample_json}"
+                try:
+                    response = openai.ChatCompletion.create(
+                        model="gpt-4",
+                        messages=[
+                            {"role": "system", "content": "You are a helpful data analyst."},
+                            {"role": "user", "content": prompt},
+                        ],
+                        temperature=0.3,
+                        max_tokens=200,
+                    )
+                    summary = response.choices[0].message.content
+                    st.markdown(summary)
+                except Exception as e:
+                    st.error(f"Error during AI summarization: {e}")
+            else:
+                st.warning("OpenAI API key is not configured. Please set OPENAI_API_KEY environment variable.")
+    except Exception as e:
+        st.error(f"Error reading uploaded file: {e}")
