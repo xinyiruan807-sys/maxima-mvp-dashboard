@@ -9,6 +9,7 @@ import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
 from datetime import datetime
+import requests
 
 # ------------------------ Page config ------------------------
 st.set_page_config(
@@ -179,6 +180,26 @@ def build_portfolio_json(px_clean: pd.DataFrame,
     return profile
 
 def explain_portfolio(profile: dict) -> str:
+ # Use external Clarity API to generate explanation
+    try:
+        url = "https://serene-development-be-487453ed3f90.herokuapp.com/api/external/v1/context-chat"
+        headers_api = {
+            "Content-Type": "application/json",
+            "X-API-KEY": "sk_Er_iWjy93brUWuAjc2nC0_9psIpV04_FFRueHO1Yd9g",
+        }
+        payload_api = {
+            "message": "Explain this portfolio.",
+            "personaId": "financial-analyst",
+            "history": [],
+            "context_data": profile,
+        }
+        resp = requests.post(url, json=payload_api, headers=headers_api, timeout=30)
+        if resp.status_code == 200:
+            data = resp.json()
+            if isinstance(data, dict) and "message" in data:
+                return data["message"]
+    except Exception as e:
+        pass
     """Generate a human-readable explanation based on portfolio JSON (mock GPT)."""
     risk = profile.get("risk_level") or "Custom"
     assets = profile.get("assets", [])
@@ -187,6 +208,7 @@ def explain_portfolio(profile: dict) -> str:
     top = sorted(assets, key=lambda x: x.get("weight", 0), reverse=True)[:3]
     top_str = ", ".join([f'{a["symbol"]} {a["weight"]*100:.1f}%' for a in top])
 
+import requests
     ret = metrics.get("portfolio_total_return")
     vol = metrics.get("portfolio_vol_ann")
     shp = metrics.get("portfolio_sharpe")
