@@ -46,13 +46,13 @@ def load_market_csv() -> pd.DataFrame:
     Load the auto-updated CSV with robust path resolution (works on Streamlit Cloud and local).
     Tries multiple candidate paths and shows which one is used.
     """
-    base = Path(__file__).parent          # e.g., <repo>/maxima-mvp-risk-demo/
-    cwd  = Path.cwd()                     # repo root on Streamlit Cloud
+    base = Path(__file__).parent
+    cwd  = Path.cwd()
 
     candidates = [
-        base / "data" / "market_latest.csv",                       # preferred
+        base / "data" / "market_latest.csv",
         cwd / "maxima-mvp-risk-demo" / "data" / "market_latest.csv",
-        cwd / "data" / "market_latest.csv",                        # fallback if placed at repo root
+        cwd / "data" / "market_latest.csv",
     ]
 
     csv_path = None
@@ -61,13 +61,12 @@ def load_market_csv() -> pd.DataFrame:
             csv_path = p
             break
 
-    st.caption(f"CSV path resolved: {csv_path if csv_path else 'NOT FOUND'}")  # for debugging
+    st.caption(f"CSV path resolved: {csv_path if csv_path else 'NOT FOUND'}")
 
     if not csv_path:
         return pd.DataFrame()
 
     df = pd.read_csv(csv_path)
-    # normalize
     colmap = {
         "date": "date", "Date": "date",
         "ticker": "symbol", "Symbol": "symbol",
@@ -109,14 +108,12 @@ def weights_by_risk(px_df: pd.DataFrame, level: str) -> dict:
     if len(symbols) == 0:
         return {}
 
-    # compute annualized vol per symbol
     vols = {}
     for s in symbols:
         r = px_df[s].pct_change().dropna()
         v = ann_vol(r)
         vols[s] = float(v) if (v is not None and np.isfinite(v)) else np.nan
 
-    # fallback: if too many NaN, use equal
     vol_series = pd.Series(vols).replace([np.inf, -np.inf], np.nan)
     if vol_series.isna().sum() >= len(vol_series) - 1:
         return {s: 1/len(symbols) for s in symbols}
@@ -180,7 +177,11 @@ def build_portfolio_json(px_clean: pd.DataFrame,
     return profile
 
 def explain_portfolio(profile: dict) -> str:
- # Use external Clarity API to generate explanation
+    """
+    Generate a human-readable explanation based on portfolio JSON. It first
+    calls Jane's Clarity API; if the call fails, it falls back to a locally generated explanation.
+    """
+    # Try calling Clarity API
     try:
         url = "https://serene-development-be-487453ed3f90.herokuapp.com/api/external/v1/context-chat"
         headers_api = {
@@ -198,17 +199,17 @@ def explain_portfolio(profile: dict) -> str:
             data = resp.json()
             if isinstance(data, dict) and "message" in data:
                 return data["message"]
-    except Exception as e:
+    except Exception:
         pass
-    """Generate a human-readable explanation based on portfolio JSON (mock GPT)."""
+
+    # Fallback to local explanation
     risk = profile.get("risk_level") or "Custom"
     assets = profile.get("assets", [])
     metrics = profile.get("metrics", {})
-    # Top-3 by weight
+
     top = sorted(assets, key=lambda x: x.get("weight", 0), reverse=True)[:3]
     top_str = ", ".join([f'{a["symbol"]} {a["weight"]*100:.1f}%' for a in top])
 
-import requests
     ret = metrics.get("portfolio_total_return")
     vol = metrics.get("portfolio_vol_ann")
     shp = metrics.get("portfolio_sharpe")
@@ -220,13 +221,16 @@ import requests
         parts.append(f"Top allocations: {top_str}.")
     if ret is not None:
         parts.append(f"Portfolio total return over the selected period is **{ret*100:.1f}%**.")
-    if vol is not None:
-        parts.append(f"Annualized volatility is **{vol*100:.1f}%**, with a Sharpe ratio of **{shp:.2f}**." if shp is not None else
-                     f"Annualized volatility is **{vol*100:.1f}%**.")
+    if vol is not None and shp is not None:
+        parts.append(f"Annualized volatility is **{vol*100:.1f}%**, with a Sharpe ratio of **{shp:.2f}**.")
+    elif vol is not None:
+        parts.append(f"Annualized volatility is **{vol*100:.1f}%**.")
     if dd is not None:
         parts.append(f"Maximum drawdown reached **{dd*100:.1f}%**.")
-    parts.append("Weights were assigned automatically based on measured volatility under the chosen risk level "
-                 "(low = inverse-volatility tilt; high = volatility tilt; medium = blended).")
+    parts.append(
+        "Weights were assigned automatically based on measured volatility under the chosen risk level "
+        "(low = inverse-volatility tilt; high = volatility tilt; medium = blended)."
+    )
     return " ".join(parts)
 
 # ------------------------ Load data ------------------------
@@ -269,7 +273,7 @@ if df_mkt.empty:
     st.info("Waiting for auto-updated CSV…")
     st.stop()
 
-# filter view
+# Filter view
 pick = pick if pick else sorted(df_mkt["symbol"].unique().tolist())[:6]
 view = df_mkt[
     (df_mkt["symbol"].isin(pick)) &
@@ -347,7 +351,6 @@ def make_weights(symbols: list[str], mode: str, px_df: pd.DataFrame, risk_level:
         return {s: 1.0/len(symbols) for s in symbols}
     if mode == "Risk Levels":
         w = weights_by_risk(px_df, risk_level or "Medium")
-        # ensure keys limited to current symbols
         w = {s: w.get(s, 0.0) for s in symbols}
         ssum = sum(w.values())
         return {k: v/ssum for k, v in w.items()} if ssum > 0 else {s: 1.0/len(symbols) for s in symbols}
@@ -388,7 +391,6 @@ if px_clean.shape[1] >= 1:
         fig_port.update_layout(margin=dict(l=0, r=0, t=20, b=0), height=340, legend_title_text="")
         st.plotly_chart(fig_port, use_container_width=True)
 
-        # component table
         rows = []
         for sym in symbols_in_view:
             r = px_clean[sym].pct_change().dropna()
@@ -413,11 +415,9 @@ if px_clean.shape[1] >= 1:
         tbl = pd.DataFrame(rows).round({"Return %": 2, "Vol %": 2, "Sharpe": 2, "MaxDD %": 2, "Weight %": 1})
         st.dataframe(tbl, use_container_width=True, height=320)
 
-        # ---------- JSON Export + Explain ----------
         st.divider()
         st.subheader("AI Profile Export & Explanation")
 
-        # extra metadata for profile
         extra = {
             "weighting_mode": mode,
             "symbols_in_view": symbols_in_view,
@@ -432,7 +432,6 @@ if px_clean.shape[1] >= 1:
             extra_metrics=extra
         )
 
-        # download JSON
         json_bytes = json.dumps(profile, indent=2).encode("utf-8")
         st.download_button(
             "Download portfolio profile (JSON)",
@@ -442,16 +441,13 @@ if px_clean.shape[1] >= 1:
             help="JSON schema for AI integration (Clarity API / Gemini / Grok, etc.)"
         )
 
-        # show JSON preview (collapsed)
         with st.expander("Preview JSON profile"):
             st.json(profile, expanded=False)
 
-        # Explain button (mock GPT)
         if st.button("Explain this portfolio"):
             explanation = explain_portfolio(profile)
             st.markdown(explanation)
 
-        # also keep CSV download for filtered view
         st.download_button(
             "Download filtered market view (CSV)",
             data=view.to_csv(index=False).encode("utf-8"),
